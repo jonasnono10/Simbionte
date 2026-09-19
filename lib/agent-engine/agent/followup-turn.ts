@@ -105,6 +105,8 @@ export type FollowupFlowTurnResult =
   | { kind: 'sent' }
   | { kind: 'skipped'; reason: string }
   | { kind: 'classified'; class: string }
+  /** O envio ficou estacionado até `until` (janela fechada) — nem saiu, nem foi recusado. */
+  | { kind: 'deferred'; until: Date; reason: string }
   | { kind: 'planned'; propostas: PropostaDeEsperaBruta[]; modelo: string };
 
 /**
@@ -309,6 +311,16 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
   };
 }
 
+/**
+ * O que aconteceu com um envio sem LLM. `deferred` carrega o INSTANTE porque
+ * quem recebe precisa dele: sem a data, "adiado" e "some" são a mesma coisa
+ * para o enrollment.
+ */
+type EnvioFixoDesfecho =
+  | { kind: "sent" }
+  | { kind: "deferred"; until: Date; reason: string }
+  | { kind: "skipped" };
+
 interface ReentrySendTarget {
   tenantId: string;
   leadId: string;
@@ -360,11 +372,20 @@ async function runFlowDrivenTurn(
     const body = await resolveFlowSendBody(pool, target.tenantId, input);
     if (body !== null) {
       // Texto do operador: sem camada semântica (ver o cabeçalho de sendFixedOutbound).
-      const sent = await sendFixedOutbound(deps, job, pool, ctx, clock, target, body, false);
-      if (sent === 'sent') {
+      const desfecho = await sendFixedOutbound(deps, job, pool, ctx, clock, target, body, false);
+      // TODO OS TRÊS DESFECHOS VOLTAM PARA O ENROLLMENT. O adiado era o que não
+      // voltava, e o silêncio dele custava o enrollment inteiro: o motor ficava
+      // rechecando um turno que ninguém ia fechar e, esgotado o orçamento do
+      // dead-man (~11h), marcava `dead` com `action_turn_never_completed` — um
+      // motivo falso, porque o worker estava vivo e o envio só esperava a
+      // janela abrir. Uma noite de sábado com domingo fechado (33h) já passava
+      // do orçamento na `main`; a faixa de envio por agente chega a 159h.
+      if (desfecho.kind === 'sent') {
         await complete(pool, { jobId:job.id,jobClaim:claimOfJob(job), organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
-      } else if(sent === 'skipped') {
+      } else if (desfecho.kind === 'skipped') {
         await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'skipped',reason:'O envio foi recusado pelas regras do atendimento.'}});
+      } else {
+        await complete(pool,{jobId:job.id,jobClaim:claimOfJob(job),organizationId:target.tenantId,enrollmentId,nodeId,result:{kind:'deferred',until:desfecho.until,reason:desfecho.reason}});
       }
       return;
     }
@@ -544,13 +565,13 @@ async function sendFixedOutbound(
   body: string,
   /** `true` só na re-entrada por template — ver o cabeçalho. */
   comCamadaSemantica: boolean,
-): Promise<"sent" | "deferred" | "skipped"> {
+): Promise<EnvioFixoDesfecho> {
   const { tenantId, leadId, channelSessionId, conversationId } = target;
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: tenantId, lead_id: leadId });
 
   if (await isLeadInHandoff(pool, tenantId, leadId)) {
     runLog.info('envio fixo pulado — lead silenciado (handoff/opt-out)', { kind: job.kind });
-    return "skipped";
+    return { kind: "skipped" };
   }
 
   const context = await getLeadContext(
@@ -617,10 +638,10 @@ async function sendFixedOutbound(
         code: chain.code,
         next_run_at: chain.nextAllowedAt.toISOString(),
       });
-      return "deferred";
+      return { kind: "deferred", until: chain.nextAllowedAt, reason: chain.code };
     }
     runLog.info('envio fixo vetado pela cadeia — não re-agendado', { code: chain.code });
-    return "skipped";
+    return { kind: "skipped" };
   }
 
   const outcome = chain.outcome;
@@ -628,7 +649,7 @@ async function sendFixedOutbound(
     case 'sent':
     case 'already_sent':
       runLog.info('envio fixo concluído', { kind: outcome.kind });
-      return "sent";
+      return { kind: "sent" };
     case 'queued':
       throw new Error('envio fixo: mensagem aguardando o canal — não conclui o passo');
     case 'blocked':

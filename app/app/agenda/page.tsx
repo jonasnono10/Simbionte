@@ -1,11 +1,17 @@
 import { addDays, startOfWeek } from "date-fns";
 import { redirect } from "next/navigation";
 
-import { enderecoDeRetorno, faltaParaConectarOGoogle, googleEstaConfigurado } from "@/lib/agenda/google/config";
+import {
+  enderecoDeRetorno,
+  faltaParaConectarOGoogle,
+  googleEstaConfigurado,
+} from "@/lib/agenda/google/config";
+import { donosDaAgenda } from "@/lib/agenda/donos-da-agenda";
 import { lerOcupacaoExterna } from "@/lib/agenda/ocupacao-externa";
 import { PROVEDOR_GOOGLE } from "@/lib/agenda/tipos";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { nomeDoContato, type ContatoNomeavel } from "@/lib/contacts/rotulo-do-contato";
+import { logger } from "@/lib/logger";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -39,9 +45,7 @@ export const dynamic = "force-dynamic";
  * embed. A cadeia estava remontada aqui, sem a guarda de identificador
  * técnico, e punha `Contato 543134@lid` no card da grade.
  */
-function contatoDoEmbed(
-  c: ContatoNomeavel | ContatoNomeavel[] | null,
-): string | undefined {
+function contatoDoEmbed(c: ContatoNomeavel | ContatoNomeavel[] | null): string | undefined {
   return nomeDoContato(Array.isArray(c) ? (c[0] ?? null) : c) ?? undefined;
 }
 
@@ -97,7 +101,9 @@ export default async function AgendaPage() {
   const [{ data: tipos }, { data: linhas }] = await Promise.all([
     supabase
       .from("calendar_event_types")
-      .select("id, name, duration_minutes, location_kind, location_details, is_active, default_owner_user_id")
+      .select(
+        "id, name, duration_minutes, location_kind, location_details, is_active, default_owner_user_id",
+      )
       .eq("organization_id", activeOrg.orgId)
       .eq("is_active", true)
       .order("name"),
@@ -167,11 +173,25 @@ export default async function AgendaPage() {
   // que a rota faz. O recorte é INTERSEÇÃO de intervalos, como no motor de
   // disponibilidade: o compromisso que atravessa a virada do dia aparece no dia
   // em que ele OCUPA, não só no dia em que ele começa (#525).
-  const { blocos: externos } = await lerOcupacaoExterna(supabase, {
-    organizationId: activeOrg.orgId,
-    de: inicio.toISOString(),
-    ate: fim.toISOString(),
-  });
+  // A ocupação é perguntada POR DONO (`p_owner`), e quem ela deve cobrir é a
+  // organização inteira: a semente desenha a coluna de cada membro, e o Atendente
+  // precisa da ocupação da dona da agenda — antes, a leitura pela sessão
+  // escondia a conexão dela dele e a grade desenhava livre o que o motor recusa
+  // (#896, item 3).
+  const { donos, erro: erroDosDonos } = await donosDaAgenda(activeOrg.orgId);
+  if (erroDosDonos) {
+    logger.warn("[agenda.page] donos da agenda não vieram", { erro: erroDosDonos });
+  }
+
+  const { blocos: externos } = await lerOcupacaoExterna(
+    supabase,
+    {
+      organizationId: activeOrg.orgId,
+      de: inicio.toISOString(),
+      ate: fim.toISOString(),
+    },
+    donos,
+  );
 
   // QUAL conta está conectada — o prop existia no cartão e NUNCA era passado,
   // então o ramo "Agenda conectada" era código morto e o botão "Conectar Google"
@@ -201,18 +221,25 @@ export default async function AgendaPage() {
   return (
     <AgendaClient
       fusoDeApresentacao={fusoDeApresentacao}
+      // QUEM ESTÁ LOGADO, do servidor. É o único jeito de a tela saber se o
+      // dono da agenda é ela mesma: sem isto, sem lista da equipe (papel sem
+      // leitura de `/api/v1/team`) a agenda inventava uma pessoa chamada "Você"
+      // para a jornada de OUTRA pessoa — ver o painel em `_client.tsx`.
+      usuarioId={user.id}
       googleConfigurado={googleConfigurado}
-      contaConectada={conexoes?.map(c => c.account_email).join(", ") || null}
+      contaConectada={conexoes?.map((c) => c.account_email).join(", ") || null}
       enderecoDeRetorno={enderecoDeRetorno()}
       faltaNoGoogle={faltaNoGoogle}
       // SÓ para quem administra a INSTALAÇÃO. A tela do app OAuth vive em
       // `/admin` e faz `notFound()` para o resto — oferecer o link a quem não
       // pode entrar seria trocar um beco por outro.
-      linkDeConfiguracaoDoGoogle={(user.is_platform_admin && !user.support) ? "/admin/google" : undefined}
+      linkDeConfiguracaoDoGoogle={
+        user.is_platform_admin && !user.support ? "/admin/google" : undefined
+      }
       // O piso da rota de marcar é `agent`; `viewer` — e o acompanhamento só de
       // leitura, que `resolveActiveOrg` resolve como `viewer` — levaria 403. A
       // tela esconder é cortesia: quem decide segue sendo a rota.
-      podeMarcarEncaixe={ROLE_RANK[activeOrg.role] >= ROLE_RANK.agent}
+      podeMarcar={ROLE_RANK[activeOrg.role] >= ROLE_RANK.agent}
       tiposIniciais={(tipos ?? []).map((t) => ({
         id: t.id,
         nome: t.name,
@@ -228,28 +255,30 @@ export default async function AgendaPage() {
         localKind: t.location_kind ?? null,
         localDetalhes: t.location_details ?? null,
       }))}
-      agendamentosIniciais={((linhas ?? []).map((a) => ({
-        id: a.id,
-        revision: a.revision,
-        titulo: a.title ?? "Agendamento",
-        responsavelId: a.owner_user_id ?? "",
-        comeca: a.starts_at,
-        termina: a.ends_at,
-        origem: "ui" as const,
-        situacao: a.status as "confirmed",
-        // "com quem" é a promessa do subtítulo desta tela, e era a única parte
-        // dela que o servidor não entregava: `contact_id` vinha no select e
-        // morria aqui. `dados-de-mentira.ts` preenche este campo nos 11 cards,
-        // então a tela pareceu pronta o tempo todo — e o `?? a.titulo` do
-        // histórico transformou a ausência em silêncio, não em erro.
-        // A ordem entre `name` e `display_name` não se decide aqui: vem de
-        // `lib/contacts/rotulo-do-contato.ts`. Este comentário apontava para
-        // `PreviewPanel.tsx` como precedente, e aquele arquivo deixou de remontar
-        // a cadeia — precedente por cópia envelhece; módulo, não. As duas colunas
-        // são reescritas pelo cascade de LGPD, então nenhuma vaza titular
-        // anonimizado.
-        quemSeraAtendido: contatoDoEmbed(a.contacts),
-      })) as AgendamentoDaTela[]).concat(
+      agendamentosIniciais={(
+        (linhas ?? []).map((a) => ({
+          id: a.id,
+          revision: a.revision,
+          titulo: a.title ?? "Agendamento",
+          responsavelId: a.owner_user_id ?? "",
+          comeca: a.starts_at,
+          termina: a.ends_at,
+          origem: "ui" as const,
+          situacao: a.status as "confirmed",
+          // "com quem" é a promessa do subtítulo desta tela, e era a única parte
+          // dela que o servidor não entregava: `contact_id` vinha no select e
+          // morria aqui. `dados-de-mentira.ts` preenche este campo nos 11 cards,
+          // então a tela pareceu pronta o tempo todo — e o `?? a.titulo` do
+          // histórico transformou a ausência em silêncio, não em erro.
+          // A ordem entre `name` e `display_name` não se decide aqui: vem de
+          // `lib/contacts/rotulo-do-contato.ts`. Este comentário apontava para
+          // `PreviewPanel.tsx` como precedente, e aquele arquivo deixou de remontar
+          // a cadeia — precedente por cópia envelhece; módulo, não. As duas colunas
+          // são reescritas pelo cascade de LGPD, então nenhuma vaza titular
+          // anonimizado.
+          quemSeraAtendido: contatoDoEmbed(a.contacts),
+        })) as AgendamentoDaTela[]
+      ).concat(
         /**
          * A ocupação do Google entra na MESMA lista, com `origem: "google_sync"`.
          *

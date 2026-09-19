@@ -28,6 +28,7 @@ const SOURCE_OPTIONS = [
   { value: undefined, label: "Todas as origens" },
   { value: "manual", label: "Manual" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "site", label: "Site (landing page)" },
   { value: "nuvemshop", label: "Nuvemshop" },
   { value: "import_csv", label: "Importado (CSV)" },
   // Os dois valores que a atribuição de anúncio grava em `contacts.source`
