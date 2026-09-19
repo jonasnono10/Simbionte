@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Cockpit SIMBIONTE V0",
+    "subtitle": "Composição somente leitura sobre contratos do core",
+    "output": "cockpit-simbionte.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    {
+      "id": "simbionte",
+      "label": "SIMBIONTE"
+    },
+    {
+      "id": "core",
+      "label": "DeskcommCRM Core"
+    },
+    {
+      "id": "humano",
+      "label": "Pessoa"
+    }
+  ],
+  "mainPath": [
+    "auth",
+    "page",
+    "readmodel",
+    "view",
+    "gestor"
+  ],
+  "nodes": [
+    {
+      "id": "auth",
+      "lane": "core",
+      "col": 0,
+      "type": "service",
+      "label": "requireAuth + organização ativa + manager"
+    },
+    {
+      "id": "page",
+      "lane": "simbionte",
+      "col": 1,
+      "type": "ui",
+      "label": "/app/cockpit — Server Component"
+    },
+    {
+      "id": "readmodel",
+      "lane": "simbionte",
+      "col": 2,
+      "type": "service",
+      "label": "Read model agregado, efêmero e tolerante a falha parcial"
+    },
+    {
+      "id": "radar",
+      "lane": "core",
+      "col": 3,
+      "type": "service",
+      "label": "Radar canônico: risco e demandas sem próximo passo"
+    },
+    {
+      "id": "fontes",
+      "lane": "core",
+      "col": 3,
+      "type": "database",
+      "label": "Tarefas, conversas, agentes, avisos, execuções e atividades"
+    },
+    {
+      "id": "view",
+      "lane": "simbionte",
+      "col": 4,
+      "type": "ui",
+      "label": "Resumo, prioridades, atendimento, IA e atividade"
+    },
+    {
+      "id": "gestor",
+      "lane": "humano",
+      "col": 5,
+      "type": "ui",
+      "label": "Gestor decide e abre o contexto no core"
+    },
+    {
+      "id": "destinos",
+      "lane": "core",
+      "col": 6,
+      "type": "ui",
+      "label": "Inbox, Radar, Tarefas, Funis e IA"
+    }
+  ],
+  "edges": [
+    {
+      "from": "auth",
+      "to": "page",
+      "label": "sessão, papel e organização confiáveis"
+    },
+    {
+      "from": "page",
+      "to": "readmodel",
+      "label": "client RLS + organization_id explícito"
+    },
+    {
+      "from": "radar",
+      "to": "readmodel",
+      "label": "classificação canônica"
+    },
+    {
+      "from": "fontes",
+      "to": "readmodel",
+      "label": "leituras paralelas sem persistência"
+    },
+    {
+      "from": "readmodel",
+      "to": "view",
+      "label": "fato, inferência e recomendação separados"
+    },
+    {
+      "from": "view",
+      "to": "gestor",
+      "label": "estado disponível, vazio, parcial ou indisponível"
+    },
+    {
+      "from": "gestor",
+      "to": "destinos",
+      "label": "abre o lugar onde a ação já existe"
+    },
+    {
+      "from": "destinos",
+      "to": "view",
+      "label": "volta ao panorama sem criar segunda verdade"
+    }
+  ]
+}

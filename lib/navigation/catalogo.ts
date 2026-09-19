@@ -105,6 +105,15 @@ export const GRUPO_NO_RODAPE: NavGroupId = "organizacao";
 export const NAV_CATALOG = [
   // ---- Atendimento — onde o operador passa o dia ----
   {
+    href: "/app/cockpit",
+    label: "Cockpit",
+    description: "O que pede atenção agora: atendimento, prioridades, IA e atividade recente.",
+    icon: "Gauge",
+    group: "atendimento",
+    minRole: "manager",
+    sidebar: true,
+  },
+  {
     href: "/app/inbox",
     label: "Inbox",
     description: "As conversas de WhatsApp, com você e a IA atendendo lado a lado.",
