@@ -76,6 +76,15 @@ const CHAMADAS = [
  * período nenhum.
  */
 const DISPENSADAS: Record<string, string> = {
+  "agenda-portao-de-hidratacao.spec.ts":
+    "não escolhe dia nem bloco — ela mede o PORTÃO de hidratação do próprio módulo do " +
+    "período (`aguardarGradeHidratada`), e por isso não pode passar por " +
+    "`irParaASemanaSeguinte`: navegar exige justamente o que ela sabota. O que ela lê da " +
+    "grade é a PRESENÇA das colunas que o servidor desenhou (`toBeAttached`), para provar " +
+    "que a sabotagem deixou a página desenhada e morta em vez de vazia — nenhuma asserção " +
+    "dela depende de haver vaga, de que dia é hoje ou de que horas são. " +
+    "⚠️ A dispensa VENCE no instante em que ela afirmar qualquer coisa sobre horário livre, " +
+    "bloco clicável ou dia escolhido: aí ela volta a medir o calendário, e precisa do módulo.",
   "agenda-kit-visual.spec.ts":
     "roda contra /vitrine-agenda, que PASSA o instante como fixture — é o padrão certo, " +
     "não a exceção: por isso ela clica num `dia-2026-08-24` fixo e segue verde com essa " +
