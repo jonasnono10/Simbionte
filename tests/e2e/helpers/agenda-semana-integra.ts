@@ -57,6 +57,81 @@ import { expect, type Page } from "@playwright/test";
 const DIAS_POR_SEMANA = 7;
 
 /**
+ * O prefixo que o React DOM grava no nó do DOM quando HIDRATA aquele nó.
+ *
+ * Ele é detalhe interno do React, e por isso não se confia nele em silêncio:
+ * `tests/unit/marcador-de-hidratacao-do-react.test.tsx` renderiza um componente
+ * de verdade e prova que o prefixo existe NESTA versão do React. Se uma
+ * atualização renomear a propriedade, aquele teste de unidade fica vermelho com
+ * o motivo escrito — em vez de TODA spec de agenda reprovar por timeout.
+ */
+export const MARCA_DE_HIDRATACAO = "__reactFiber$";
+
+/**
+ * Espera a grade HIDRATAR antes de qualquer leitura ou clique.
+ *
+ * ═══ O defeito que este portão existe para fechar ════════════════════════════
+ *
+ * As colunas já vêm prontas no HTML do servidor, então `toBeAttached` fica
+ * verde enquanto a página ainda é um desenho morto: ler ali lê o que o SERVIDOR
+ * desenhou, e clicar ali é um clique que ninguém escuta.
+ *
+ * E servidor e navegador NÃO desenham a mesma semana. O servidor calcula a
+ * semana inicial com `new Date()` no fuso DELE (`app/app/agenda/page.tsx`, a
+ * semente da grade — UTC no runner do CI); o cliente recalcula no fuso do
+ * NAVEGADOR (`app/app/agenda/_client.tsx`, `React.useState(() => new Date())`),
+ * que estas specs fixam em `America/Sao_Paulo`. Entre 00:00Z e 03:00Z de
+ * sábado→domingo os dois discordam: para o servidor já é a semana seguinte.
+ *
+ * Medido em 2026-09-20, três runs consecutivos e um rerun (jobs 105992226489,
+ * 105991221117, 105989506332), todos com a mesma mensagem:
+ *
+ *     a grade não trocou de semana depois do clique em `periodo-seguinte`
+ *     Expected: not "2026-09-20"
+ *
+ * A sequência, que faz o `not.toBe` nunca poder passar — não é lentidão:
+ *
+ *     1. lê `antes[0]` do HTML do servidor  ....... 2026-09-20 (semana de UTC)
+ *     2. a hidratação devolve a semana de SP  ..... 2026-09-13
+ *     3. o clique soma sete dias  ................. 2026-09-20
+ *     4. compara 2026-09-20 com `antes[0]`  ....... IGUAIS → reprova por 20 s
+ *
+ * Fora dessa janela o mesmo descompasso dá o outro sabor: o clique cai antes da
+ * hidratação, ninguém o escuta, e a grade fica onde estava.
+ *
+ * Por que o portão é este e não `waitForLoadState`: "a rede parou" não é "o
+ * React assumiu o DOM". O que separa os dois é a marca que o React grava no nó
+ * ao hidratá-lo, e é ela que se espera aqui.
+ */
+export async function aguardarGradeHidratada(page: Page): Promise<void> {
+  const colunas = page.locator('[data-testid^="coluna-dia-"]');
+  await expect(
+    colunas.first(),
+    "a grade não desenhou dia nenhum — a tela da agenda não chegou a montar",
+  ).toBeAttached({ timeout: 25_000 });
+
+  await expect
+    .poll(
+      () =>
+        page
+          .getByTestId("periodo-seguinte")
+          .evaluate(
+            (el, marca) => Object.keys(el).some((k) => k.startsWith(marca)),
+            MARCA_DE_HIDRATACAO,
+          )
+          .catch(() => false),
+      {
+        timeout: 25_000,
+        message:
+          "a grade não hidratou: o botão de período continua sendo o desenho do " +
+          "servidor, sem o React por trás. Ler ou clicar aqui mede o HTML inicial, " +
+          "não o produto (veja `MARCA_DE_HIDRATACAO` se o React mudou de versão).",
+      },
+    )
+    .toBe(true);
+}
+
+/**
  * Leva a agenda para a semana seguinte e devolve os dias que ela passou a
  * desenhar, em `yyyy-MM-dd`.
  *
@@ -64,11 +139,10 @@ const DIAS_POR_SEMANA = 7;
  * busca quando o recorte muda, e medir no meio da troca lê a semana velha.
  */
 export async function irParaASemanaSeguinte(page: Page): Promise<string[]> {
-  const colunas = page.locator('[data-testid^="coluna-dia-"]');
-  await expect(
-    colunas.first(),
-    "a grade não desenhou dia nenhum — a tela da agenda não chegou a montar",
-  ).toBeAttached({ timeout: 25_000 });
+  // ⚠️ O portão vem ANTES da leitura, não só antes do clique: `antes[0]` lido do
+  // HTML do servidor é a semana errada, e a comparação do fim passa a ser entre
+  // duas verdades diferentes. Ver `aguardarGradeHidratada`.
+  await aguardarGradeHidratada(page);
   const antes = await diasDesenhados(page);
 
   await page.getByTestId("periodo-seguinte").click();
@@ -112,10 +186,7 @@ export async function irParaASemanaDoCompromisso(page: Page, instanteISO: string
     return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`;
   }, instanteISO);
 
-  await expect(
-    page.locator('[data-testid^="coluna-dia-"]').first(),
-    "a grade não desenhou dia nenhum — a tela da agenda não chegou a montar",
-  ).toBeAttached({ timeout: 25_000 });
+  await aguardarGradeHidratada(page);
 
   // Teto explícito: a consulta que alimenta estas specs olha 14 dias à frente,
   // então três saltos bastam. Sem teto, uma chave que a grade nunca desenha
@@ -138,7 +209,9 @@ export async function diasDesenhados(page: Page): Promise<string[]> {
   return (
     await page
       .locator('[data-testid^="coluna-dia-"]')
-      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")!.replace("coluna-dia-", "")))
+      .evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-testid")!.replace("coluna-dia-", "")),
+      )
   ).sort();
 }
 
@@ -254,7 +327,7 @@ async function diasCheios(page: Page): Promise<string[]> {
   await page.getByTestId("mes-seguinte").click();
   await expect(
     page.locator('[data-testid^="dia-"][data-disponivel="true"]').first(),
-      "nem o mês seguinte oferece dia — a consulta deveria ter pedido o mês visível",
+    "nem o mês seguinte oferece dia — a consulta deveria ter pedido o mês visível",
   ).toBeVisible({ timeout: 20_000 });
   return varrer();
 }
