@@ -111,7 +111,6 @@ export const NAV_CATALOG = [
     icon: "Gauge",
     group: "atendimento",
     minRole: "manager",
-    sidebar: true,
   },
   {
     href: "/app/inbox",
