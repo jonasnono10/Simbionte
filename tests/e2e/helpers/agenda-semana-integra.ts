@@ -103,7 +103,7 @@ export const MARCA_DE_HIDRATACAO = "__reactFiber$";
  * React assumiu o DOM". O que separa os dois é a marca que o React grava no nó
  * ao hidratá-lo, e é ela que se espera aqui.
  */
-export async function aguardarGradeHidratada(page: Page): Promise<void> {
+export async function aguardarGradeHidratada(page: Page, teto = 25_000): Promise<void> {
   const colunas = page.locator('[data-testid^="coluna-dia-"]');
   await expect(
     colunas.first(),
@@ -121,7 +121,10 @@ export async function aguardarGradeHidratada(page: Page): Promise<void> {
           )
           .catch(() => false),
       {
-        timeout: 25_000,
+        // O teto é parâmetro por causa de `agenda-portao-de-hidratacao.spec.ts`,
+        // a guarda que sabota a hidratação para ver este portão REPROVAR: com o
+        // teto de produção ela gastaria meio minuto de CI provando o mesmo.
+        timeout: teto,
         message:
           "a grade não hidratou: o botão de período continua sendo o desenho do " +
           "servidor, sem o React por trás. Ler ou clicar aqui mede o HTML inicial, " +

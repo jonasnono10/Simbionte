@@ -1033,6 +1033,7 @@ jobs:
 
       SPECS_PARTE_5: >-
         inbox-busca-e-filtros-dizem-a-verdade.spec.ts
+        agenda-portao-de-hidratacao.spec.ts
         qa-l12-inbox.spec.ts
         filtro-por-marcador-pela-tela.spec.ts
         followup-builder.spec.ts
