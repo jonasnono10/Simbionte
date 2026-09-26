@@ -111,7 +111,6 @@ export const NAV_CATALOG = [
     icon: "Gauge",
     group: "atendimento",
     minRole: "manager",
-    sidebar: true,
   },
   {
     href: "/app/inbox",
@@ -385,6 +384,25 @@ export const NAV_CATALOG = [
     section: "Acompanhar o agente",
   },
   {
+    // "Aviso no WhatsApp", NUNCA "Avisos": a vizinha de cima chama-se "Alertas"
+    // e É a central de avisos — todo o vocabulário interno dela é "aviso"
+    // (POLITICAS_DE_AVISO, REFERENCIAS_DE_AVISO). Duas entradas com a mesma
+    // palavra, na mesma seção, é a tela ficando ilegível para quem não
+    // programa. O rótulo nomeia o CANAL e o destinatário.
+    href: "/app/ai/cases/avisos",
+    label: "Aviso no WhatsApp",
+    description: "Receber no WhatsApp quando o assistente abrir um caso.",
+    icon: "PaperPlaneTilt",
+    group: "ia",
+    section: "Acompanhar o agente",
+    // `admin` porque escolhe um número conectado e manda dado de cliente para um
+    // celular — o mesmo gate da rota e da RLS de `config_aviso_de_caso`.
+    minRole: "admin",
+    // SEM `sidebar`: o grupo IA já tem treze telas e o e2e de navegação exige
+    // que o menu inteiro caiba em 900px de altura. Configurar isto é tarefa de
+    // poucas vezes; o caminho é o hub "Ver tudo em IA".
+  },
+  {
     // Órfã: nenhum lugar do app linkava para cá. O flywheel gerava propostas de
     // melhoria do agente e a fila só era vista por quem soubesse a URL.
     href: "/app/ai/proposals",
@@ -632,7 +650,7 @@ export const NAV_CATALOG = [
     href: "/app/settings/conversoes",
     label: "Conversões",
     description:
-      "Devolver ao anúncio as vendas que ele trouxe, para ele aprender a procurar mais clientes parecidos.",
+      "Devolver ao anúncio as vendas que ele trouxe, e marcar a origem de quem chega pelo site.",
     icon: "ChartLineUp",
     group: "organizacao",
     section: "Sua empresa",
@@ -701,6 +719,15 @@ export const NAV_CATALOG = [
     group: "organizacao",
     section: "Dados e acesso",
     minRole: "admin",
+  },
+  {
+    href: "/app/extensions",
+    label: "Extensões",
+    description:
+      "Guias instalados para orientar o trabalho no CRM, com permissões e estado visíveis.",
+    icon: "PuzzlePiece",
+    group: "organizacao",
+    section: "Sua empresa",
   },
 ] as const satisfies readonly NavMetadata[];
 

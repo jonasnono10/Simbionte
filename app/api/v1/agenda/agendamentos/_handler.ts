@@ -68,11 +68,25 @@ export interface MarcarInput {
   title?: string;
   notes?: string;
   /**
+   * Observação do compromisso — o campo `description` do calendário externo.
+   *
+   * Distinto de `notes`: `notes` é anotação INTERNA (numa clínica, queixa) e
+   * não entra na revisão publicável (`fn_google_projection_stamp`). Sem este
+   * campo a observação gravava em `notes` e o calendário nascia mudo.
+   */
+  description?: string;
+  /**
+   * Endereço/local DESTE compromisso. Ausente herda o do tipo; `""` grava
+   * vazio — quem apagou o que o tipo sugeria quis apagar, não herdar de novo.
+   */
+  location_details?: string;
+  /**
    * Convidado externo, digitado na tela. `""` limpa; ausente não mexe.
    *
-   * NÃO é `contact_id`, e a distinção é o motivo de a coluna existir: o contato
-   * é quem recebe o atendimento, e quem precisa entrar na sala pode ser outra
-   * pessoa. Quem transforma isto em convite do Google é o worker de push.
+   * NÃO é o e-mail da ficha do contato. O contato (quem é atendido) entra no
+   * convite do Google pelo e-mail da ficha, quando existe. Este campo é a outra
+   * pessoa — acompanhante, responsável. Quem transforma os dois em `attendees`
+   * é o worker de push.
    */
   guest_email?: string;
 }
@@ -193,7 +207,11 @@ export async function marcarAgendamentoHandler(
       conversation_id: booking?.boundary.conversation_id ?? input.conversation_id ?? null,
       meeting_delivery: delivery as unknown as Json,
       location_kind: tipo.location_kind,
-      location_details: tipo.location_details,
+      location_details:
+        input.location_details !== undefined
+          ? input.location_details.trim() || null
+          : tipo.location_details,
+      description: input.description !== undefined ? input.description.trim() || null : null,
       notes: input.notes ?? null,
       // `|| null` e não `?? null`: a rota deixa passar `""` (o campo limpo na
       // tela), e string vazia gravada seria um convidado sem e-mail — que faz o
@@ -545,18 +563,26 @@ export function podeMarcarForaDaGrade(actor: Actor): boolean {
  *   não para o dia. Essa conta segura o alinhamento ao expediente, o aviso
  *   mínimo, a janela de reserva e a ocupação que CRUZA o pedido.
  *
- *   ⚠️ Ela NÃO segura tudo o que o GET do dia esconde, porque a coleta de
- *   OCUPAÇÃO acompanha a janela estreita. Dois furos, anteriores ao encaixe,
- *   foram medidos em 2026-09-15 chamando este handler com a coleta de verdade
- *   sobre o banco em memória de `tests/unit/pessoa-marca-fora-da-grade.test.ts`
- *   (sonda não versionada). Um segue aberto:
- *   · **buffer contra vizinho** (issue #876) — `coletaOQueOcupa` só traz o que
- *     cruza `[inicio, fim]`. Com `buffer_before_minutes = 30` e um compromisso
- *     que termina 12:45Z, o pedido de 13:00Z não vê o vizinho e é ACEITO — e o
- *     GET do dia não oferece 13:00Z (medição do revisor do lote 8). Para valer,
- *     a janela de coleta teria de ser alargada por `buffer_before`/`buffer_after`.
+ *   Alguns furos em que esta conta deixava passar o que o GET do dia esconde,
+ *   anteriores ao encaixe, foram medidos em 2026-09-15 chamando este handler
+ *   com a coleta de verdade sobre o banco em memória de
+ *   `tests/unit/pessoa-marca-fora-da-grade.test.ts`. Os três estão fechados:
+ *   · **buffer contra vizinho** (issue #876, PR #1027) — `coletaOQueOcupa` só
+ *     trazia o que cruza `[inicio, fim]`, e com `buffer_before_minutes = 30` o
+ *     pedido de 13:00Z não via o vizinho que termina 12:45Z. `horariosLivresDaOrg`
+ *     agora alarga a coleta por `buffer_before`/`buffer_after`. Vigiado pelos
+ *     casos de intervalo antes do atendimento no mesmo arquivo de teste.
  *
- *   O outro, a EXCEÇÃO DE DATA à noite, foi fechado (issue #878, PR #882): era colhida
+ *   · **remarcar contando a si mesmo** (issue #1084) — o efeito colateral do
+ *     alargamento acima: a coleta passou a ver também o PRÓPRIO compromisso de
+ *     saída. Com 30 min de intervalo antes, a IA remarcando 13:00Z → 14:00Z
+ *     levava 422 `agenda_horario_indisponivel`; sem intervalo, o mesmo movimento
+ *     era aceito. A grade agora repassa `ignorarAgendamentoId` a
+ *     `horariosLivresDaOrg`. Vigiado pelos casos de remarcação com intervalo no
+ *     mesmo arquivo de teste — inclusive um CONTROLE de que o intervalo segue
+ *     valendo contra OUTRO compromisso.
+ *
+ *   · **exceção de data à noite** foi fechada (issue #878, PR #882): era colhida
  *   pela data UTC de `inicio`/`fim`, e em São Paulo 21:00 do dia 07 é 00:00Z do
  *   dia 08 — o pedido era ACEITO num dia inteiro bloqueado. `horariosLivresDaOrg`
  *   agora a busca no dia LOCAL do fuso da jornada, com um dia de margem de cada
@@ -583,9 +609,15 @@ async function exigeHorarioLivre(
     inicio: Date;
     fim: Date;
     /**
-     * O compromisso sendo remarcado, que não conta como ocupação de si mesmo.
-     * Só o encaixe o usa. A grade não o repassa a `horariosLivresDaOrg`, então
-     * ali o compromisso segue ocupando o horário de onde sai.
+     * O compromisso sendo remarcado: ocupa o horário de ONDE SAI, não o de DESTINO.
+     *
+     * Vale para os DOIS ramos. A pergunta é a mesma nos dois — "o que já está
+     * tomado?" — e a resposta tem de excluir este compromisso. No encaixe quem
+     * exclui é `exigeSemSobreposicao`; na grade o id vai a `horariosLivresDaOrg`,
+     * que o repassa à coleta. Sem isso, com intervalo configurado, o próprio
+     * compromisso cruzava a janela alargada e a IA remarcando para logo depois do
+     * próprio fim levava 422 `agenda_horario_indisponivel` por causa de si mesma
+     * (issue #1084).
      */
     ignorarAgendamentoId?: string;
   },
@@ -596,6 +628,7 @@ async function exigeHorarioLivre(
     de: args.inicio,
     ate: args.fim,
     agora: new Date(),
+    ignorarAgendamentoId: args.ignorarAgendamentoId,
   });
 
   if (!consulta.ok) {
@@ -680,9 +713,29 @@ async function exigeSemSobreposicao(
   }
 }
 
-/** `Actor` → o vocabulário de `calendar_appointments.created_by_kind`. */
+/**
+ * `Actor` → o vocabulário de `calendar_appointments.created_by_kind`.
+ *
+ * ⚠️ O TOKEN DE SERVIDOR NÃO É A IA. Este ternário dizia `ai` para TUDO que não
+ * fosse pessoa, e a MESMA ação saía com duas autorias no MESMO request: a
+ * timeline, logo abaixo, grava `autorParaTimeline(ctx.actor.type)` — que manda
+ * `api_token` para `system` —, e a coluna do compromisso dizia `ai`. A tela
+ * (`ROTULO_DO_AUTOR`) anunciava "Marcado pelo atendente de IA" para compromisso
+ * que algoritmo nenhum escreveu (issue #866). Fora daqui, `actorParaAtividade`
+ * (lib/leads/activity-emitter.ts) e `especieDe` (lib/operacao/autoria.ts) já
+ * diziam o mesmo: quem age por token é o PRODUTO, não a IA.
+ *
+ * `webhook_source` continua `ai` — e isso é divergência CONHECIDA, não
+ * esquecimento: a automação do motor se apresenta como IA no balão da conversa
+ * (`components/inbox/MessageBubble.tsx`), e mover as duas colunas juntas é
+ * decisão de produto com efeito de leitura (as telas que contam "o que a IA
+ * marcou/falou" passam a excluir automação). Fica para issue própria, com o
+ * mesmo argumento escrito no mapeamento de `messages.sent_via`.
+ */
 function autorParaCriacao(actor: Actor): string {
-  return actor.type === "user" ? "user" : "ai";
+  if (actor.type === "user") return "user";
+  if (actor.type === "api_token") return "system";
+  return "ai";
 }
 
 /**

@@ -90,6 +90,22 @@ export const tenantSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("").transform(() => null)),
+  /**
+   * O país da organização (issue #1033): ISO-3166 alpha-2, maiúsculas, `null` =
+   * Brasil. É a MESMA régua do CHECK `organizations_country_check` da migration
+   * 0277 — a validação de aplicação e a do banco não podem divergir, ou a tela
+   * aceita o que o banco recusa (e o erro chega como 500 em vez de formulário).
+   * Aqui NÃO se valida se o país tem perfil revisado: quem oferece a lista é
+   * `paisesOferecidos()` (`lib/legal/perfil-do-pais.ts`), e o valor que chega é
+   * conferido contra ela um degrau antes de gravar — país sem lei revisada não
+   * entra nem por API.
+   */
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/)
+    .nullable()
+    .optional()
+    .or(z.literal("").transform(() => null)),
   timezone: z.string().min(1).max(64),
   locale: z.enum(LOCALES),
   currency: z.enum(MOEDAS),
@@ -108,7 +124,6 @@ export const tenantSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("").transform(() => null)),
-  lost_reasons_extra: z.array(z.string().min(1).max(80)).max(50).default([]),
 });
 export type TenantInput = z.infer<typeof tenantSchema>;
 

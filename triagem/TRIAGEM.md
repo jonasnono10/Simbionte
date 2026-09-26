@@ -93,12 +93,22 @@ Nesta ordem:
    `conclusion`, e o comando é este, sempre, antes de qualquer outra coisa:
 
    ```bash
-   BR=$(gh pr view <n> --json headRefName --jq .headRefName)
-   for id in $(gh api repos/{owner}/{repo}/actions/runs \
-                 --jq "[.workflow_runs[] | select(.head_branch==\"$BR\" and .conclusion==\"action_required\")] | .[].id"); do
+   SHA=$(gh pr view <n> --json headRefOid --jq .headRefOid)
+   for id in $(gh api "repos/{owner}/{repo}/actions/runs?head_sha=$SHA" \
+                 --jq '[.workflow_runs[] | select(.conclusion=="action_required")] | .[].id'); do
      gh api -X POST "repos/{owner}/{repo}/actions/runs/$id/approve"
    done
    ```
+
+   **A chave é o `head_sha`, nunca o nome da branch** — é o achado 17 deste arquivo, aplicado
+   aqui. `head_branch` é um nome que o contribuidor escolhe, e um fork que abriu o PR a partir
+   da `main` dele faz o filtro casar com a `main` do upstream; com dois forks assim ao mesmo
+   tempo, o laço aprova o run do PR errado, que é executar código de terceiro sem revisão.
+   A troca conserta um segundo defeito de brinde: `actions/runs` sem `?head_sha=` devolve as
+   **30 mais recentes** e filtra no cliente, e a densidade deste repo passa de 400 runs/dia —
+   ou seja, as 30 cobrem minutos, e o exemplo do próprio parágrafo abaixo é um PR de **6 dias**.
+   Filtrando no servidor por `head_sha`, o conjunto já nasce pequeno e a paginação deixa de
+   existir como problema.
 
    Medido: o PR #176 ficou **6 dias** aberto e, quando a triagem chegou, os 4 workflows estavam em
    `action_required` desde o primeiro push. A latência de 5h08min que este arquivo cita não é
@@ -109,8 +119,9 @@ Nesta ordem:
 **A liberação do CI é o primeiro comando da triagem, antes de ler o diff.** Medido em 2026-09-03: numa fila de 26 PRs, **12 workflows** de cinco contribuidores estavam parados em `action_required`, um deles havia mais de um dia — e três PRs tinham **zero** execuções no `head_sha` (ver modo de falha 17). Cada minuto entre abrir o PR e liberar é latência pura, que é o gargalo que este documento existe para matar. Libere primeiro; avalie depois.
 
 A acolhida **não contém juízo técnico**. É isso, e só isso, que a torna segura de ser automática:
-ela não pode estar errada sobre o mérito porque não fala do mérito. Ela diz três coisas — o `Vercel`
-vermelho é esperado em fork e não é culpa dele, o CI está sendo liberado, e quando vem o veredito.
+ela não pode estar errada sobre o mérito porque não fala do mérito. Ela diz três coisas — o CI está
+sendo liberado, onde olhar o que trava o merge, e quando vem o veredito. O texto vive em
+`references/resposta-ao-contribuidor.md`, espelhado em `.github/workflows/acolhida.yml`.
 
 Todo comentário desta triagem abre com a âncora invisível `<!-- triagem-de-pr:v1:pass=N -->`. Leia as
 âncoras existentes antes de escrever: **acolhida nunca é postada duas vezes.**
@@ -130,6 +141,40 @@ Todo comentário desta triagem abre com a âncora invisível `<!-- triagem-de-pr
 
 PR pequeno não paga pipeline caro. Isso não é economia: triagem lenta reintroduz exatamente a
 latência que ela existe para matar.
+
+---
+
+## 2-bis. Destino da mudança — núcleo, extensão ou ambos
+
+Para uma mudança de comportamento, registre o destino e a razão antes da reconciliação. A lei
+é a [doutrina de extensões](../docs/doctrine/extensoes.md) (item 18 do DoD); o critério foi
+aprovado no PROG-017, seção 2 (documento interno de decisão, fora do repositório público; a régua que vale para PR está em [`docs/doctrine/extensoes.md`](../docs/doctrine/extensoes.md)).
+O núcleo precisa continuar útil com zero extensões; nichos podem acrescentar capacidades sem
+determinar a operação de todas as instalações.
+
+| Destino | O que sustenta a classificação |
+|---|---|
+| Núcleo | Operação comum ou garantia compartilhada: identidade, autorização, isolamento, auditoria, contratos e cadeia de envio. Correções de comportamento já entregue continuam no componente responsável. |
+| Extensão | Jornada adicional, aparência, integração ou especialização com configuração, dados e manutenção próprios, cuja ausência não compromete a operação comum. |
+| Ambos | Um ponto genérico necessário no núcleo e uma extensão que o consome. Declare o consumidor real, o contrato e a prova dos dois lados. |
+| Infraestrutura/documentação | Mudança em build, CI, kit de instalação, ferramenta interna ou documentação, inclusive a correção de um comportamento desses componentes (um `update.sh` que falhava é infraestrutura). Correção de comportamento do produto fica no destino do componente que corrige: núcleo ou extensão. Indique a superfície que ela mantém. |
+
+Ser útil a vários setores não obriga um recurso a ficar ligado para todos. Também não basta
+chamar uma pasta de plugin: um candidato precisa de caminho previsto de instalação, permissões,
+compatibilidade, atualização, desativação e preservação dos dados. Se uma fronteira ainda não
+existe, registre a dependência; não anuncie um SDK ou isolamento que ainda não foi entregue.
+
+**Durante a construção da plataforma**, classificar como extensão é orientação de destino, não
+exigência de que o contribuidor use uma ferramenta inexistente. Preserve o trabalho, separe a
+parte genérica quando isso mantiver a intenção e leve apenas a escolha de produto ainda aberta
+ao mantenedor. Uma correção urgente não espera a plataforma inteira ficar pronta. Recursos já
+distribuídos só serão extraídos com equivalência demonstrada e migração explícita; esta
+classificação não autoriza removê-los ou desligá-los.
+
+Na revisão, percorra três relações: o que a mudança usa, quem depende dela e quais falhas externas
+podem alterá-la. Compatibilidade de contrato, filas antigas, revogação e exportação/anonimização
+entram na prova quando forem alcançadas pelo diff. O parecer registra o destino; a publicação e
+o merge continuam sujeitos à fronteira de autorização deste procedimento.
 
 ---
 
@@ -403,7 +448,8 @@ junto com o disco do 12-bis: são os dois instrumentos da triagem que falham em 
 ## 3-quinquies. Fila grande — a integração em lote, e o gate que ela esconde
 
 **Gatilho: mais de ~10 PRs abertos.** Abaixo disso, trie e mergeie um a um. Acima, um a um é a
-decisão errada, e a razão se mede antes de começar:
+decisão errada **para a faixa completa**, e a razão se mede antes de começar (a faixa leve tem regra
+própria logo abaixo):
 
 ```bash
 git fetch origin --force $(for n in $(gh pr list --state open --limit 100 --json number \
@@ -475,6 +521,97 @@ isso funcionar, e cada uma já falhou quando ausente:
    duplicado. **E PR em rascunho não entra no lote.** Rascunho é o autor dizendo "não terminei";
    mede-se e comenta-se (a revisão de segurança vale como comentário antecipado), mas integrá-lo
    tira dele o rebase que ele mesmo anunciou.
+
+### A faixa leve não espera o lote — merge automático no próprio PR
+
+**Decisão do dono, 18/09/2026.** PR da faixa leve (pequeno, checks obrigatórios verdes, teste que
+cobre o comportamento alterado, nada em schema, permissões, segurança, dinheiro, instalação ou
+efeito externo) **não entra em lote**. Aprovado na leitura, ele recebe o merge automático e entra
+sozinho quando os checks ficarem verdes:
+
+```bash
+gh pr merge <n> --auto --merge      # merge de verdade, nunca squash — mesma razão do item 1 acima
+```
+
+**Por quê, medido (15–18/09/2026, 249 PRs mergeados):** o PR esperava o merge **depois** de verde
+3,7 h na mediana e 28,7 h no p90 — mais do que todo o ciclo de CI (0,7 h na mediana). A espera era
+pelo lote, não pelo CI. O lote continua sendo a ferramenta certa onde ele protege algo: arquivo
+de apêndice (`baseline.sql`, `MANIFEST.md`), migration e interação entre PRs da faixa completa. A
+fila de merge (merge queue) do GitHub, que faria isso por nós, **não está disponível** neste
+repositório (conta pessoal; a regra é recusada com 422).
+
+Quatro cuidados, cada um com a sonda:
+
+1. **Dependência entre PRs.** Se o PR depende de outro ainda aberto, ele vai com o lote. Confira
+   antes de ligar: o corpo do PR e `git diff --name-only origin/main...refs/tri/<n>` contra os
+   arquivos dos outros candidatos.
+2. **O teto do CHANGELOG** (seção abaixo). Os fragmentos do merge automático ficam na `main`
+   esperando o próximo corte. Antes de montar um lote, conte `ls .changes/*.md | wc -l`: se a
+   faixa leve já encheu o teto, **corte a versão antes do lote**.
+3. **A rede é o CI da `main`**, que roda depois de cada merge. `main` vermelha por causa de um
+   merge automático é a primeira coisa que a rodada conserta, antes de qualquer lote.
+4. **Janela de corte de versão.** Enquanto um corte está anunciado e ainda não saiu, PR cujo
+   fragmento declara `impacto: capacidade_nova` ou `exige_acao` **não recebe `--auto`**, e o que já
+   tinha recebido é desligado até o corte (`gh pr merge <n> --disable-auto`). O merge automático não
+   olha o calendário: entrando no meio da janela, ele converte o patch anunciado numa minor — foi o
+   ponto levantado em 18/09, com a 1.35.1 esperando o #1196. PR `nada_mudou` segue normal.
+
+   **Ausência de fragmento não é `nada_mudou`.** PR que toca `app/`, `lib/`, `components/`,
+   `workers/`, `hooks/` ou `supabase/` e não traz fragmento com `impacto:` é **NÃO CLASSIFICADO**:
+   não recebe `--auto` na janela de corte até alguém escrever o fragmento — o triador escreve,
+   creditando o autor (§12). A sonda anterior
+   (`git diff --name-only origin/main...refs/tri/<n> -- .changes/ | xargs -r grep -h '^impacto:'`)
+   devolvia **vazio** nesse caso, e o vazio foi lido como "não é `capacidade_nova`": o #1211
+   (`utm_adset`/`utm_ad`/`utm_placement`, capacidade nova) entrou assim, sem nota, no meio da janela
+   da 1.35.1. Ela tinha um segundo ponto cego: o `grep` lia o fragmento na árvore de quem roda a
+   sonda, onde o arquivo do PR não existe. A sonda que distingue os três desfechos:
+
+   Um segundo sinal, barato e complementar ao diff (ideia da sessão Maestro PRs): PR cujo **título**
+   começa com `feat` ou traz "capacidade" e não tem fragmento é NÃO CLASSIFICADO mesmo que o diff pareça
+   pequeno ou fique fora das pastas do produto. Título que não se consegue ler conta como NÃO
+   CLASSIFICADO — a sonda falha fechada. A sonda que distingue os desfechos:
+
+   ```bash
+   sonda_da_janela() {  # uso: sonda_da_janela origin/main refs/tri/<n> <n>
+     local base=$1 head=$2 n=${3:-} arquivos fragmentos toca impactos titulo motivos=""
+     arquivos=$(git diff --name-only "$base...$head")
+     toca=$(printf '%s\n' "$arquivos" | grep -cE '^(app|lib|components|workers|hooks|supabase)/')
+     fragmentos=$(git diff --name-only --diff-filter=AM "$base...$head" -- '.changes/*.md')
+     # O fragmento é lido do PR (git show), nunca da árvore de quem roda a sonda.
+     impactos=$(printf '%s\n' "$fragmentos" | while read -r f; do
+       [ -n "$f" ] && git show "$head:$f" | grep -h '^impacto:'; done)
+     if [ -n "$impactos" ]; then
+       printf '%s\n' "$impactos" | sort -u
+       return
+     fi
+     [ "$toca" -gt 0 ] && motivos="toca $toca arquivo(s) do produto"
+     if [ -n "$n" ]; then
+       if titulo=$(gh pr view "$n" --json title --jq .title 2>/dev/null) && [ -n "$titulo" ]; then
+         printf '%s' "$titulo" | grep -qiE '^feat|capacidade' &&
+           motivos="${motivos:+$motivos; }o título diz \"$titulo\""
+       else
+         motivos="${motivos:+$motivos; }título do #$n não lido"
+       fi
+     fi
+     if [ -n "$motivos" ]; then
+       echo "NÃO CLASSIFICADO: $motivos — e não traz fragmento com impacto"
+     else
+       echo "sem fragmento; não toca o produto; título sem sinal de capacidade"
+     fi
+   }
+   ```
+
+   Controle positivo, medido em 18/09 — a sonda tem de acusar o #1211 antes de ser usada:
+
+   ```console
+   $ sonda_da_janela 976707c3a 1594de0d6 1211      # o #1211, sem fragmento
+   NÃO CLASSIFICADO: toca 3 arquivo(s) do produto; o título diz "feat(atribuicao): conjunto, anúncio e posicionamento atravessam o link do site" — e não traz fragmento com impacto
+   $ sonda_da_janela origin/main refs/tri/1202 1202  # fragmento nada_mudou
+   impacto: nada_mudou
+   ```
+
+   Só `impacto: nada_mudou` libera o `--auto` na janela. `capacidade_nova`, `exige_acao` e
+   **NÃO CLASSIFICADO** esperam o corte.
 
 ### ⚠️ O gate que o lote esconde: `build`
 
@@ -1035,6 +1172,7 @@ Três regras duras:
 ```
 VEREDITO: MERGEAR | MERGEAR+ISSUE | SEGURAR
 main: <sha curto>            prévia do merge: <tree>
+DESTINO:     <núcleo | extensão | ambos | infraestrutura/documentação> — <razão e dependências>
 MEDIDO:      <o quê> — <comando> — <saída observada>
 NÃO MEDIDO:  <o quê> — <por quê>
 BLOQUEADOR:  <arquivo:linha> — <o defeito> — <como reproduzir>
@@ -1221,9 +1359,45 @@ E confira o desfecho, porque "a tag saiu" não é "a versão chegou":
 ```bash
 git ls-remote --tags origin 'refs/tags/vX.Y.Z'          # a tag existe
 gh release list --limit 1                                # a release é a Latest
+
+# A vitrine lista, nos TRÊS idiomas. O href carrega o prefixo da PÁGINA, então o padrão
+# se monta com ele: trocar só a URL e manter `href="/changelog/..."` devolve 0 nas
+# páginas em en e es COM a versão listada. Cada linha tem de dar http=200 e listada≥1.
+# O http= vai junto porque `listada=0` sozinho não distingue "não listou ainda" de
+# "essa página não existe" — num 404 a contagem também é 0.
+V=X.Y.Z
+for p in /changelog /en/changelog /es/changelog; do
+  u="https://www.deskcomm.com.br$p"
+  echo "$p: http=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 30 "$u")" \
+       "listada=$(curl -sL --max-time 30 "$u" | grep -c "href=\"$p/$V\"")"
+done
+
 # e as três imagens no digest da versão, contra `stable` — receita em
 # docs/runbooks/ativar-packaging.md
 ```
+
+**Deu 0? Olhe o `http=` ANTES de repetir.** `http=404` não é janela de cache: é a página não
+existir, e nenhuma quantidade de repetição conserta isso. Nesse estado o 0 não fala da versão,
+fala do site — a vitrine sai de um PR do repositório `deskcomm-site`, e sem ele no ar o passo do
+corte reprova toda release. Escale ao mantenedor em vez de investigar o `CHANGELOG.md`.
+
+**`http=200` com `listada=0`? Repita antes de concluir qualquer coisa.** A página revalida a cada
+10 minutos e lê o `CHANGELOG.md` pelo `raw.githubusercontent.com`, que guarda outros 5: a versão
+aparece em até ~15 min, e é o próprio acesso que agenda a regeneração. Por isso o passo do
+`release.yml` repete a sonda 35 vezes com um minuto entre elas — não duas. Se persistir depois
+disso, a ordem de investigação está em `docs/doctrine/versionamento.md` (seção "A vitrine").
+
+O `grep -c` é de propósito: ele conta, e para contar lê a entrada inteira. Um `grep -q` no lugar
+sai no primeiro casamento, o `curl` do outro lado do cano leva EPIPE e desiste — e a versão
+LISTADA aparece como faltando assim que o HTML tiver uma quebra de linha depois do link.
+
+**O status desse caso é 23, não 141.** O `curl` ignora o SIGPIPE e escolhe o próprio código de
+saída (`CURLE_WRITE_ERROR`); com `set -o pipefail` o status do cano vira 23, e o `-s` engole a
+única frase que explicaria (`curl: (23) Failure writing output to destination` — troque por `-S -s`
+para vê-la). O **141** que a lista de erros registra é o caso vizinho — `echo "$DIFF" | grep -q`
+no `complemento.sh` —, em que a esquerda do cano é builtin do shell: builtin morre de sinal mesmo,
+e aí sim 128+13. Procurar 141 numa triagem vermelha por ESTA receita não acha nada.
+
 ---
 
 ## 12-ter. O PR cujo conteúdo entrou DERIVADO — o merge de proveniência
@@ -2398,7 +2572,7 @@ Cada um destes foi cometido de verdade nesta casa, e é por isso que estão escr
 
     ```bash
     gh pr checks <N> --json name,bucket --jq '
-      [.[]|select(.bucket!="skipping")|select(.name|test("^Vercel")|not)]
+      [.[]|select(.bucket!="skipping")]
       | if   (any(.bucket=="fail"))    then "VERMELHO"
         elif (any(.bucket=="pending")) then "AINDA RODANDO"
         else "VERDE" end'
@@ -2489,17 +2663,17 @@ Cada um destes foi cometido de verdade nesta casa, e é por isso que estão escr
 
 57. **Reconciliação que REMOVE um artefato e deixa o inventário que o declarava.** Tirar um
     workflow, uma rota ou uma tela é metade do conserto: a outra metade é o mapa que a enumera
-    (`GATILHO_ESPERADO`, `vercel.ts`, `registry.ts`, `SPECS_PARTE_*`). Em 14/09 removi o workflow
-    de deploy de um fork e deixei as três entradas dele no `GATILHO_ESPERADO` — e não vi porque, no
-    worktree da reconciliação, rodei só o teste que eu sabia afetado. **Depois de reconciliar, rode
-    a suíte, não o arquivo.** O arquivo que você lembra é o que você já sabe; o que quebra é o que
-    você não pensou.
+    (`GATILHO_ESPERADO`, `registry.ts`, `SPECS_PARTE_*`). Em 14/09 removi o workflow de deploy de
+    um fork e deixei as três entradas dele no `GATILHO_ESPERADO` — e não vi porque, no worktree da
+    reconciliação, rodei só o teste que eu sabia afetado. **Depois de reconciliar, rode a suíte,
+    não o arquivo.** O arquivo que você lembra é o que você já sabe; o que quebra é o que você não
+    pensou.
 
-58. **Duas reconciliações feitas em ordem diferente da ordem de merge.** Reconciliei o `vercel.ts`
-    do #767 antes de o #805 entrar no lote; o #805 criou um cron que aquele `vercel.ts` não
-    conhecia. Cada reconciliação estava certa contra a árvore em que foi feita. **Inventário se
-    confere na árvore do LOTE montado, depois do último merge** — nunca na branch de reconciliação
-    isolada.
+58. **Duas reconciliações feitas em ordem diferente da ordem de merge.** Reconciliei o inventário
+    de crons `vercel.ts` (apagado em 17/09) do #767 antes de o #805 entrar no lote; o #805 criou um
+    cron que aquele inventário não conhecia. Cada reconciliação estava certa contra a árvore em que
+    foi feita. **Inventário se confere na árvore do LOTE montado, depois do último merge** — nunca
+    na branch de reconciliação isolada.
 
 59. **Exit 1 com zero falhas, e as duas sondas concordando em zero.** O rodapé `Tests … 0 failed` e
     o `grep FAIL` vazio não esgotam o que reprova uma suíte: erro não tratado sai numa terceira

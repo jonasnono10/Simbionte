@@ -127,6 +127,11 @@ const ACTION_MIN_ROLE: Record<string, Role> = {
   "ai.automatico.view": "agent",
   "ai.inbox.view": "agent",
   "inbox.notes.view": "agent",
+  // O cartão da passagem, dentro da conversa. `agent` e não `viewer` porque é o
+  // piso que a policy de `passagens_de_atendimento` exige (migration 0291): o
+  // briefing diz MAIS que a conversa — diz o que a IA concluiu sobre a pessoa.
+  // Um `viewer` que sondasse esta rota levaria 403 em toda abertura de conversa.
+  "inbox.passagens.view": "agent",
   "message-templates.view": "agent",
   "ai.agents.view": "manager",
   "ai.agents.write": "admin",

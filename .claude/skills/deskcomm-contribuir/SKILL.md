@@ -1,6 +1,6 @@
 ---
 name: deskcomm-contribuir
-description: 'Guia de contribuição ao DeskcommCRM para quem vai mexer no código e abrir um pull request, sobretudo de um fork. Use SEMPRE que a pessoa disser que vai contribuir, corrigir um bug, implementar algo, abrir ou atualizar um PR, criar uma migration, resolver conflito com a main, ou perguntar "como eu testo isso", "minha branch está atrasada?", "por que o CI ficou vermelho", "o Vercel falhou" — e antes de qualquer commit em clone que não seja do mantenedor. É o espelho da triagem: mede ANTES do PR o que o mantenedor mede depois (branch atrasada, tripla de migration, marca do fork no diff, fragmento de release, teste que falta, prova em tela), arma os hooks de git e evita retrabalho e PR recusado.'
+description: 'Guia de contribuição ao DeskcommCRM para quem vai mexer no código e abrir um pull request, sobretudo de um fork. Use SEMPRE que a pessoa disser que vai contribuir, corrigir um bug, implementar algo, abrir ou atualizar um PR, criar uma migration, resolver conflito com a main, ou perguntar "como eu testo isso", "minha branch está atrasada?", "por que o CI ficou vermelho" — e antes de qualquer commit em clone que não seja do mantenedor. É o espelho da triagem: mede ANTES do PR o que o mantenedor mede depois (branch atrasada, tripla de migration, marca do fork no diff, fragmento de release, teste que falta, prova em tela), arma os hooks de git e evita retrabalho e PR recusado.'
 metadata:
   publico: contribuidor externo, dev de agência, fork
   espelho-de: triagem/TRIAGEM.md
@@ -171,6 +171,18 @@ Um parágrafo do ponto de vista do operador. Sem título, sem ⚠. Crédito: @se
 de release é automático e uma seção à mão já quase publicou uma versão pelo merge de um PR.
 `exige_acao` só se o operador precisa fazer algo na VPS (variável nova obrigatória, por exemplo) —
 e aí o instalador precisa perguntar por ela.
+
+O texto do fragmento vira a nota pública da versão: a LP publica o `CHANGELOG.md` em
+[deskcomm.com.br/changelog](https://www.deskcomm.com.br/changelog), nos três idiomas. Escreva
+para quem nunca viu o código.
+
+**Mexeu num guia** (`.agents/skills/deskcomm-*`: nome, o que ele faz, como chamar)? Rode
+`pnpm skills:sync` e avise no PR que a página de guias da LP
+([deskcomm.com.br/guias](https://www.deskcomm.com.br/guias), arquivo `conteudo/guias.ts` do
+repositório `deskcomm-site`) precisa acompanhar — senão ela passa a ensinar um guia que não existe.
+
+As duas páginas saem de um PR do `deskcomm-site`; um `404` nesses dois links quer dizer que ele
+ainda não entrou, não que você errou o caminho.
 
 ## Passo 8 — o PR
 

@@ -9,7 +9,7 @@ import { Phone, Robot } from "@/lib/ui/icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { OwnerBadge } from "@/components/kanban/OwnerBadge";
-import { comandoDaConversa } from "@/lib/inbox/comando-da-conversa";
+import { comandoDaConversa, esperaDaConversa } from "@/lib/inbox/comando-da-conversa";
 import { cn } from "@/lib/utils";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
@@ -100,12 +100,20 @@ function relativeTime(iso: string | null, locale: Locale): string {
   return format(d, "dd/MM");
 }
 
-/** "Aguardando há 5 min" — desde a última mensagem do cliente (fallback: criação). */
+/**
+ * "Aguardando há 5 min" — desde quando o cliente ESPERA.
+ *
+ * A régua é `esperaDaConversa`, a mesma `awaiting_since` que ordena a Fila
+ * (#990): `last_inbound_at` é a ÚLTIMA mensagem do cliente, então a pílula de
+ * quem insistia voltava para "há 1 min" a cada mensagem dele — o tempo na linha
+ * contradizia a posição do lado e a ordem da lista. O fallback segue sendo a
+ * criação, para a conversa que nunca recebeu mensagem.
+ */
 function waitingLabel(
   conversation: ConversationWithContact,
   t: (texto: string) => string = (texto) => texto, locale: Locale,
 ): string {
-  const since = conversation.last_inbound_at ?? conversation.created_at;
+  const since = esperaDaConversa(conversation);
   if (!since) return t("Aguardando");
   return `${t("Aguardando")} ${formatDistanceToNowStrict(new Date(since), { addSuffix: true, locale: locale })}`;
 }
@@ -134,9 +142,9 @@ export function ConversationListItem({
   /**
    * A HORA DO CANTO RESPONDE À MESMA PERGUNTA QUE ORDENA A LISTA.
    *
-   * Na Fila a lista sai por TEMPO DE ESPERA (`ORDEM_DA_ESPERA`: `last_inbound_at`
-   * crescente), mas a hora do canto era sempre a da última mensagem de QUALQUER
-   * lado. Bastava o atendente responder para o número daquela linha pular para
+   * Na Fila a lista sai por TEMPO DE ESPERA (`ORDEM_DA_ESPERA`: `awaiting_since`
+   * crescente — a mensagem mais antiga sem resposta, #990), mas a hora do canto era
+   * sempre a da última mensagem de QUALQUER lado. Bastava o atendente responder para o número daquela linha pular para
    * agora sem que a linha saísse do lugar: lida de cima para baixo, a coluna de
    * horas saía fora de ordem (#464 — "a lista parece aleatória") embaixo de uma
    * lista que estava certa.
@@ -149,7 +157,7 @@ export function ConversationListItem({
    * de distância, seriam a próxima divergência.
    */
   const horaDaOrdem = naFila
-    ? conversation.last_inbound_at ?? conversation.created_at
+    ? esperaDaConversa(conversation)
     : conversation.last_message_at;
   const time = relativeTime(horaDaOrdem, localeDaData);
   const unread = conversation.unread_count_for_assignee ?? 0;
@@ -257,9 +265,10 @@ export function ConversationListItem({
           <span
             className="shrink-0 text-[11px] tabular-nums text-text-subtle"
             // O mesmo lugar da tela mostra duas coisas diferentes conforme a aba:
-            // na Fila é "desde quando o cliente escreveu", nas outras é "há quanto
-            // tempo a conversa mexeu". O rótulo existe só onde a leitura muda.
-            title={naFila ? t("Última mensagem do cliente") : undefined}
+            // na Fila é "desde quando o cliente ESPERA" (a mensagem mais antiga sem
+            // resposta — #990), nas outras é "há quanto tempo a conversa mexeu". O
+            // rótulo existe só onde a leitura muda.
+            title={naFila ? t("Desde quando o cliente espera resposta") : undefined}
           >
             {time}
           </span>
