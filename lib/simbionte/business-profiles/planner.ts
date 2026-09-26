@@ -11,9 +11,9 @@ const fieldValue = z.strictObject({
   fieldKey: z.string(), label: z.string(), type: z.string(), required: z.boolean(),
 });
 const snapshot = z.discriminatedUnion("resourceKind", [
-  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("pipeline"), resourceId: z.string().min(1), parentKey: z.null().optional(), value: pipelineValue }),
-  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("stage"), resourceId: z.string().min(1), parentKey: z.string(), value: stageValue }),
-  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("field"), resourceId: z.string().min(1), parentKey: z.string(), value: fieldValue }),
+  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("pipeline"), resourceRef: z.string().min(1), parentKey: z.null().optional(), value: pipelineValue }),
+  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("stage"), resourceRef: z.string().min(1), parentKey: z.string(), value: stageValue }),
+  z.strictObject({ contributionKey: z.string().nullable(), resourceKind: z.literal("field"), resourceRef: z.string().min(1), parentKey: z.string(), value: fieldValue }),
 ]);
 
 export type ProfileResourceSnapshot = z.infer<typeof snapshot>;
@@ -31,7 +31,7 @@ export type ProfilePlanChange = {
   classification: ProfileChangeClass;
   contributionKey: string;
   resourceKind: ResourceKind;
-  resourceId: string | null;
+  resourceRef: string | null;
   parentKey: string | null;
   base: ProfileValue | null;
   local: ProfileValue | null;
@@ -93,7 +93,7 @@ function classify(
     return { classification: "SAFE_ADD", reason: "Nova configuração proposta, sem alterar recurso existente." };
   }
   if (!local) return { classification: "CONFLICT", reason: "Recurso antes gerido está ausente; exige reconciliação explícita." };
-  if (base.resourceKind !== target.kind || local.resourceKind !== target.kind || base.resourceId !== local.resourceId) {
+  if (base.resourceKind !== target.kind || local.resourceKind !== target.kind || base.resourceRef !== local.resourceRef) {
     return { classification: "CONFLICT", reason: "Identidade ou tipo do recurso gerido mudou." };
   }
   const targetValue = valueOf(target);
@@ -114,12 +114,12 @@ function classify(
 
 function indexSnapshots(rows: ProfileResourceSnapshot[], label: string): Map<string, ProfileResourceSnapshot> {
   const index = new Map<string, ProfileResourceSnapshot>();
-  const resourceIds = new Set<string>();
+  const resourceRefs = new Set<string>();
   for (const raw of rows) {
     const row = snapshot.parse(raw);
-    const identity = `${row.resourceKind}:${row.resourceId}`;
-    if (resourceIds.has(identity)) throw new Error(`${label}: recurso duplicado ${identity}`);
-    resourceIds.add(identity);
+    const identity = `${row.resourceKind}:${row.resourceRef}`;
+    if (resourceRefs.has(identity)) throw new Error(`${label}: recurso duplicado ${identity}`);
+    resourceRefs.add(identity);
     if (row.contributionKey === null) {
       if (label === "BASE") throw new Error("BASE: contribuição aplicada sem chave");
       continue;
@@ -144,7 +144,7 @@ export function planBusinessProfileChanges(input: {
   const local = indexSnapshots(input.local, "LOCAL");
   const allLocal = input.local.map((row) => snapshot.parse(row)).sort(
     (a, b) => RESOURCE_ORDER[a.resourceKind] - RESOURCE_ORDER[b.resourceKind]
-      || compareKeys(a.parentKey ?? "", b.parentKey ?? "") || compareKeys(a.resourceId, b.resourceId),
+      || compareKeys(a.parentKey ?? "", b.parentKey ?? "") || compareKeys(a.resourceRef, b.resourceRef),
   );
   const wanted = new Map(target.contributions.map((item) => [item.key, item]));
   const keys = new Set([...base.keys(), ...wanted.keys()]);
@@ -165,7 +165,7 @@ export function planBusinessProfileChanges(input: {
       ...verdict,
       contributionKey: key,
       resourceKind: kind,
-      resourceId: current?.resourceId ?? collision?.resourceId ?? prior?.resourceId ?? null,
+      resourceRef: current?.resourceRef ?? collision?.resourceRef ?? prior?.resourceRef ?? null,
       parentKey,
       base: prior?.value ?? null,
       local: current?.value ?? collision?.value ?? null,

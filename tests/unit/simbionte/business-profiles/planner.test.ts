@@ -9,16 +9,16 @@ import {
 function row(item: ProfileContribution): ProfileResourceSnapshot {
   switch (item.kind) {
     case "pipeline": return {
-      contributionKey: item.key, resourceKind: "pipeline", resourceId: "pipeline-1", parentKey: null,
+      contributionKey: item.key, resourceKind: "pipeline", resourceRef: "pipeline-1", parentKey: null,
       value: { name: item.name, isDefault: false },
     };
     case "stage": return {
-      contributionKey: item.key, resourceKind: "stage", resourceId: `stage-${item.step}`,
+      contributionKey: item.key, resourceKind: "stage", resourceRef: `stage-${item.step}`,
       parentKey: item.pipelineKey,
       value: { name: item.name, step: item.step, position: item.position, isWon: item.step === "won", isLost: item.step === "lost" },
     };
     case "field": return {
-      contributionKey: item.key, resourceKind: "field", resourceId: `field-${item.fieldKey}`,
+      contributionKey: item.key, resourceKind: "field", resourceRef: `field-${item.fieldKey}`,
       parentKey: item.pipelineKey,
       value: { fieldKey: item.fieldKey, label: item.label, type: item.type, required: false },
     };
@@ -93,16 +93,16 @@ describe("planejador three-way", () => {
     expect(pick(missing, "pipeline.main").classification).toBe("CONFLICT");
 
     const swapped = rows(GENERIC_PROFILE);
-    swapped[0]!.resourceId = "outro-recurso";
+    swapped[0]!.resourceRef = "outro-recurso";
     expect(pick(planBusinessProfileChanges({ base, local: swapped, target: GENERIC_PROFILE }), "pipeline.main").classification).toBe("CONFLICT");
 
     const foreign: ProfileResourceSnapshot = {
-      contributionKey: null, resourceKind: "pipeline", resourceId: "pipeline-alheio", parentKey: null,
+      contributionKey: null, resourceKind: "pipeline", resourceRef: "pipeline-alheio", parentKey: null,
       value: { name: "Clientes", isDefault: true },
     };
     const collision = planBusinessProfileChanges({ base: null, local: [foreign], target: GENERIC_PROFILE });
     expect(pick(collision, "pipeline.main").classification).toBe("CONFLICT");
-    expect(pick(collision, "pipeline.main").resourceId).toBe("pipeline-alheio");
+    expect(pick(collision, "pipeline.main").resourceRef).toBe("pipeline-alheio");
     expect(pick(collision, "pipeline.main").local).toEqual({ name: "Clientes", isDefault: true });
     expect(pick(collision, "stage.main.new").classification).toBe("CONFLICT");
     expect(pick(collision, "stage.main.new").blocked).toBe(true);
