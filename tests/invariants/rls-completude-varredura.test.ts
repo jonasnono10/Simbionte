@@ -75,6 +75,9 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "business_profile_installations", razao: "tests/invariants/business-profile-persistence.test.ts — manager/admin da org A leem a instalação; manager da org B lê zero de A por JWT; viewer/agent, convite pendente e platform admin fora de suporte não leem" },
+  { tabela: "business_profile_contributions", razao: "tests/invariants/business-profile-persistence.test.ts — contribuição real na org A, leitura positiva manager/admin local e zero cross-tenant por JWT de manager B; sem escrita direta" },
+  { tabela: "business_profile_operations", razao: "tests/invariants/business-profile-persistence.test.ts — operação real na org A, leitura positiva manager/admin local e zero cross-tenant por JWT de manager B; sem escrita direta" },
   { tabela: "config_aviso_de_caso", razao: "tests/invariants/aviso-de-caso-escrita.test.ts — dois tenants reais por JWT: admin lê só a própria organização, agent e viewer não leem nada, e a escrita direta por authenticated é negada (a única porta é fn_definir_aviso_de_caso, que revalida papel, suporte e MFA)" },
   { tabela: "entregas_de_aviso_de_caso", razao: "tests/invariants/aviso-de-caso-escrita.test.ts — manager lê o histórico da própria organização e zero do vizinho; viewer lê zero; escrita direta por authenticated negada nos três verbos, e apagar a channel_sessions apontada não falha e deixa a configuração desligada" },
   { tabela: "organization_extensions", razao: "tests/invariants/extensoes-declarativas.test.ts — dois tenants com vínculos reais: leitura positiva local/negativa cruzada por JWT, revogação de membership e escrita direta negada" },
