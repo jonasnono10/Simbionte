@@ -52,7 +52,7 @@ describe("Business Profile — upgrade real da versão anterior", () => {
     expect(sql("select count(*) from pg_class where relname like 'business_profile_%' and relkind='r';"))
       .toBe("0");
     const migration = readFileSync(
-      path.resolve("supabase/migrations/20260925235500_0343_business_profile_persistence.sql"),
+      path.resolve("supabase/migrations/20261003212120_0535_business_profile_persistence.sql"),
       "utf8",
     );
     sql(migration);

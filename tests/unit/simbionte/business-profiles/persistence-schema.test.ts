@@ -4,12 +4,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "../../../..");
-const migrationName = "20260925235500_0343_business_profile_persistence.sql";
+const migrationName = "20261003212120_0535_business_profile_persistence.sql";
 const migration = readFileSync(path.join(root, "supabase/migrations", migrationName), "utf8");
 const baseline = readFileSync(path.join(root, "supabase/baseline.sql"), "utf8");
 const manifest = readFileSync(path.join(root, "supabase/migrations/MANIFEST.md"), "utf8");
-const marker = "-- ---- memória e governança dos Business Profiles (migration 0343) ----";
-const anonSweep = "-- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----";
+const marker = "-- ---- memória e governança dos Business Profiles (migration 0535) ----";
+const endMarker = "-- ---- fim da memória e governança dos Business Profiles (migration 0535) ----";
 
 function normalized(sql: string): string {
   return sql.replace(/--[^\r\n]*/g, "").replace(/\s+/g, " ").trim();
@@ -19,10 +19,11 @@ describe("Business Profile — tripla de migration sem aplicador", () => {
   it("baseline e migration contêm o mesmo DDL efetivo", () => {
     const sections = baseline.split(marker);
     expect(sections).toHaveLength(2);
-    const afterBlock = (sections[1] ?? "").split(anonSweep);
+    const afterBlock = (sections[1] ?? "").split(endMarker);
     expect(afterBlock).toHaveLength(2);
     expect(normalized(afterBlock[0] ?? "")).toBe(normalized(migration));
-    expect(manifest).toContain("0343_business_profile_persistence");
+    expect(migration).toMatch(/^-- manifest: .+/m);
+    expect(manifest).not.toContain("business_profile_persistence");
   });
 
   it("cria só memória, sem função ou trigger que escreva no CRM", () => {

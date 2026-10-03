@@ -20,6 +20,8 @@ const RADAR_VAZIO: RadarDeRisco = {
   total: 0,
   sem_proximo_passo: [],
   total_sem_proximo_passo: 0,
+  propostas_vencidas_sem_retomada: [],
+  propostas_esperando_revisao: [],
 };
 
 const TAREFAS_VAZIAS: TarefasDoCockpit = { atrasadas: 0, itens: [] };

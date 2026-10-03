@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { lerInterface } from "@/lib/navigation/interface";
+import { combinarInterfaces } from "@/lib/navigation/interface";
 /**
  * Server-side auth helpers — load AuthUser, resolve active org, gate routes.
  *
@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { empresaExigeMfa, exigeCadastroDeMfa } from "@/lib/auth/politica-mfa";
 import { normalizarIdioma } from "@/lib/i18n/idiomas";
+import { STATUS_OPERANTE, ehOperante } from "@/lib/organizacao/operante";
 import type { AuthUser, Role, UserOrgMembership, ActiveOrg } from "./types";
 
 const ACTIVE_ORG_COOKIE = "active_org";
@@ -27,11 +28,29 @@ interface RawMembershipRow {
   /** Só para ORDENAR — a lista decide qual organização fica ativa sem cookie. */
   accepted_at?: string | null;
   organizations: OrgJoin | OrgJoin[] | null;
+  /**
+   * As portas da EMPRESA, por embed PRÓPRIO (`organizations.interface_settings`,
+   * migration 0367). Ficam fora de `organizations(display_name, locale)` de
+   * propósito: aquele embed é o que a membership SEMPRE trouxe — nome e IDIOMA da
+   * empresa, lidos em toda navegação — e um jsonb novo ali faria a escolha de menu
+   * mexer no caminho de quem só precisa saber em que língua desenhar a tela.
+   */
+  interface_da_empresa: OrgJoinEmpresa | OrgJoinEmpresa[] | null;
 }
 
 interface OrgJoin {
   display_name: string;
   locale: string | null;
+  timezone: string | null;
+  currency: string | null;
+  country: string | null;
+  status?: string;
+  suspended_kind?: string | null;
+}
+
+/** O mesmo `organizations`, alcançado por outro embed: só as portas da EMPRESA. */
+interface OrgJoinEmpresa {
+  interface_settings?: unknown;
 }
 
 /**
@@ -63,10 +82,14 @@ function escolherMembroAtivo(
 ): UserOrgMembership | null {
   if (memberships.length === 0) return null;
   if (cookieOrg) {
+    // Com cookie, MANTÉM mesmo a suspensa: é por ela que a pessoa chega ao hub
+    // `/account-suspended` para pagar, pedir LGPD ou trocar de empresa.
     const achado = memberships.find((o) => o.organization_id === cookieOrg);
     if (achado) return achado;
   }
-  return memberships[0] ?? null;
+  // Sem cookie, a primeira OPERANTE na mesma ordem (`accepted_at`,
+  // `organization_id`); a primeira de todas só quando nenhuma opera.
+  return memberships.find((o) => ehOperante(o.org_status)) ?? memberships[0] ?? null;
 }
 
 /**
@@ -159,14 +182,21 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
     await Promise.all([
       supabase
         .from("platform_admins")
-        .select("user_id, revoked_at")
+        .select("user_id, scope, revoked_at")
         .eq("user_id", user.id)
         .is("revoked_at", null)
         .maybeSingle(),
       supabase
         .from("user_organizations")
         .select(
-          "organization_id, role, interface_settings, accepted_at, organizations(display_name, locale)",
+          // Dois embeds do MESMO `organizations`, como manda o PostgREST quando a
+          // mesma relação aparece duas vezes: `organizations(...)` continua sendo
+          // o que a membership sempre trouxe (nome, IDIOMA e FUSO da empresa — o
+          // idioma decide a tela inteira e não pode depender de um embed que a
+          // issue #1341 acabou de engordar), e o alias traz só as portas da EMPRESA.
+          // `timezone` veio do main (fuso da organização nas listas, #1290) e convive
+          // com o alias: um embed por relação, sem renomear o que já existia.
+          "organization_id, role, interface_settings, accepted_at, organizations(display_name, locale, timezone, currency, country, status, suspended_kind), interface_da_empresa:organizations(interface_settings)",
         )
         .eq("user_id", user.id)
         .is("revoked_at", null)
@@ -210,12 +240,22 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
   const memberships: UserOrgMembership[] = rows.map((row) => {
     const orgs = row.organizations;
     const org = Array.isArray(orgs) ? (orgs[0] ?? null) : orgs;
+    const empresas = row.interface_da_empresa;
+    const empresa = Array.isArray(empresas) ? (empresas[0] ?? null) : empresas;
     return {
       organization_id: row.organization_id,
       organization_name: org?.display_name ?? "—",
       role: row.role as Role,
-      interface_settings: lerInterface(row.interface_settings).settings,
+      // EMPRESA ∩ VÍNCULO (migration 0367): a empresa escolhe o universo de
+      // portas da instalação, o vínculo escolhe menos dentro dele. Até aqui o
+      // vínculo decidia sozinho, então a escolha da empresa não existia.
+      interface_settings: combinarInterfaces(empresa?.interface_settings, row.interface_settings),
       locale: org?.locale ?? null,
+      timezone: org?.timezone ?? null,
+      currency: org?.currency ?? null,
+      country: org?.country ?? null,
+      org_status: org?.status ?? null,
+      suspended_kind: org?.suspended_kind ?? null,
     };
   });
 
@@ -241,6 +281,7 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
     full_name: fullName,
     avatar_url: avatarUrl,
     is_platform_admin: !!paRow,
+    platform_admin_scope: paRow?.scope ?? null,
     locale,
     idioma,
     timezone,
@@ -250,17 +291,42 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
 });
 
 /**
- * Resolves the active organization for the current request.
- * Priority: cookie `active_org` (if member of) → first membership.
- * Returns null if user has zero memberships.
+ * A organização ativa SEM o portão de suspensão — o corpo que `resolveActiveOrg`
+ * tinha até a spec da cobrança (§4, item 3).
+ *
+ * Só para quem PRECISA enxergar a org parada: `requireRole` (responde 403
+ * `org_suspended` em JSON, não 307), o hub `/account-suspended`, leitura que não
+ * pode sumir para o suspenso (`lib/legal/operador.ts`) e o início de um
+ * acompanhamento, que só guarda para onde voltar (`admin/tenants/[id]/impersonate`).
+ * Rota de API usa `orgAtivaDaApi` (lib/auth/require-role.ts: 403 JSON); o resto,
+ * `resolveActiveOrg`.
  */
-export const resolveActiveOrg = cache(async (authUser: AuthUser): Promise<ActiveOrg | null> => {
+export const orgAtivaSemPortao = cache(async (authUser: AuthUser): Promise<ActiveOrg | null> => {
   if (authUser.support) {
     if (authUser.support.status !== "active") redirect("/support-ended");
+    // Acompanhamento não tem membership, e era por isso que este caminho
+    // devolvia a organização PELADA: sem fuso, e agora sem moeda nem país. A
+    // tela então caía nos padrões e mostrava `R$` dentro de uma empresa em
+    // euro — o mesmo defeito que este conserto ataca, por outra porta. Uma
+    // leitura por id, só nas sessões de acompanhamento; falha degrada para o
+    // que havia antes, porque perder o acesso de suporte é pior que um símbolo
+    // errado.
+    const { data: orgDoSuporte } = await createAdminClient()
+      .from("organizations")
+      .select("timezone, currency, country")
+      .eq("id", authUser.support.organization_id)
+      .maybeSingle();
     return {
       orgId: authUser.support.organization_id,
       name: authUser.support.name,
       role: authUser.support.access_mode === "full" ? "admin" : "viewer",
+      timezone: orgDoSuporte?.timezone ?? null,
+      currency: orgDoSuporte?.currency ?? null,
+      country: orgDoSuporte?.country ?? null,
+      // `fn_support_context` só devolve status 'active' com a org em 'active'
+      // (`o.status <> 'active'` vira 'revoked'), e a linha acima já saiu.
+      org_status: STATUS_OPERANTE,
+      suspended_kind: null,
     };
   }
   const store = await cookies();
@@ -271,7 +337,28 @@ export const resolveActiveOrg = cache(async (authUser: AuthUser): Promise<Active
     name: ativo.organization_name,
     role: ativo.role,
     interface_settings: ativo.interface_settings,
+    timezone: ativo.timezone ?? null,
+    currency: ativo.currency ?? null,
+    country: ativo.country ?? null,
+    org_status: ativo.org_status ?? null,
+    suspended_kind: ativo.suspended_kind ?? null,
   };
+});
+
+/**
+ * Resolves the active organization for the current request.
+ * Priority: cookie `active_org` (if member of) → first OPERANT membership → first.
+ * Returns null if user has zero memberships.
+ *
+ * Org NÃO operante redireciona para `/account-suspended` (mesmo precedente do
+ * `/support-ended`). É isto que fecha páginas, layouts e server actions de uma vez.
+ * NUNCA em rota de API (`app/api/**`): o `fetch` seguiria o 307 para HTML — lá
+ * é `orgAtivaDaApi` (cerca `tests/unit/api-nao-redireciona-org-suspensa.test.ts`).
+ */
+export const resolveActiveOrg = cache(async (authUser: AuthUser): Promise<ActiveOrg | null> => {
+  const org = await orgAtivaSemPortao(authUser);
+  if (org && !ehOperante(org.org_status)) redirect("/account-suspended");
+  return org;
 });
 
 /**
@@ -287,10 +374,18 @@ export async function requireAuth(): Promise<AuthUser> {
 /**
  * Returns true if the current session has at least one verified TOTP factor.
  * Use only in Server Components / Server Actions (cookie session).
+ *
+ * LANÇA quando não conseguiu ler os fatores. O `listFactors()` do auth-js não
+ * lança: ele chama `getUser()` pela rede e, se falhar, DEVOLVE
+ * `{ data: null, error }`. Ler só `data` transformava essa falha em "não tem
+ * fator" — e `mfaEmDivida` liberava a sessão `aal1` de quem TEM fator. Uma
+ * leitura que não aconteceu não pode virar resposta: quem decide acesso falha
+ * fechado (a exceção vira 500 na rota, nunca 200).
  */
 export const isMfaEnrolled = cache(async (): Promise<boolean> => {
   const supabase = await createClient();
-  const { data } = await supabase.auth.mfa.listFactors();
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error) throw error;
   return !!data?.totp?.some((f) => f.status === "verified");
 });
 

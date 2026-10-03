@@ -90,6 +90,15 @@ export interface Lead {
   } | null;
   assigned_at: string | null;
   last_activity_at: string | null;
+  /**
+   * 0071: quando o lead ENTROU no estágio atual. Carimbado por trigger.
+   *
+   * É o relógio de "tempo no estágio" (`hoursInStage` do card do Kanban) e
+   * nada mais: `last_activity_at` é tempo SEM RESPOSTA, que é outra pergunta.
+   * Nullable porque a coluna é `timestamptz` sem `not null` — o backfill da 0071
+   * cobriu o que existia, mas lead escrito fora do trigger pode vir nulo.
+   */
+  stage_changed_at: string | null;
   expected_close_date: string | null;
   closed_at: string | null;
   source: string;
@@ -107,6 +116,17 @@ export interface Lead {
    * contato (criado à mão ou por webhook) simplesmente não tem.
    */
   contact_tags?: string[];
+  /**
+   * Derivado (não é coluna): telefone, e-mail e links (Instagram, site, Google
+   * Meu Negócio…) do CONTATO deste negócio — o que o card do funil mostra sem
+   * abrir o dossiê. Ausente quando o negócio não tem contato, o contato foi
+   * anonimizado (LGPD) ou o campo está vazio: o payload do quadro não engorda.
+   * Os links vêm de `contacts.custom_fields` (`lib/leads/links-de-contato.ts`),
+   * já validados — só http/https.
+   */
+  contact_phone?: string;
+  contact_email?: string;
+  contact_links?: Array<{ tipo: string; href: string }>;
   /**
    * Derivado (não é coluna): os marcadores das CONVERSAS do contato deste
    * negócio — a terceira caixa, "Tags da conversa" no painel do Inbox, onde a

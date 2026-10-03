@@ -118,16 +118,28 @@ export async function avisarLeadDaEscalacao(
   opts: AvisoDeEscalacaoOpts,
 ): Promise<DesfechoDoAviso> {
   let body: string;
+  // O aviso sai no idioma da ORGANIZAÇÃO (ver `textoDoAviso`). Leitura que
+  // falha não impede o aviso: cai no português, como antes.
+  let idioma: string | null = null;
+  try {
+    const { rows } = await pool.query<{ locale: string | null }>(
+      'select locale from organizations where id = $1',
+      [ids.tenantId],
+    );
+    idioma = rows[0]?.locale ?? null;
+  } catch {
+    idioma = null;
+  }
   try {
     const { quem } = await expectativaDeAtendimento(pool, ids.tenantId, opts.now);
-    body = textoDoAviso(opts.motivo, quem, ids.leadId);
+    body = textoDoAviso(opts.motivo, quem, ids.leadId, idioma);
   } catch (err) {
     // `expectativaDeAtendimento` já tem rede própria; se ainda assim quebrar,
     // a frase conservadora (sem prazo) é a certa — nunca a ausência de frase.
     opts.log.warn('aviso de escalação: disponibilidade não lida, usando a frase conservadora', {
       error: err instanceof Error ? err.message.slice(0, 120) : 'erro desconhecido',
     });
-    body = textoDoAviso(opts.motivo, null, ids.leadId);
+    body = textoDoAviso(opts.motivo, null, ids.leadId, idioma);
   }
 
   try {
@@ -140,6 +152,11 @@ export async function avisarLeadDaEscalacao(
       channelSessionId: ids.channelSessionId,
       body,
       optedOutThisTurn: opts.optedOutThisTurn,
+      // O aviso de escalação RESponde a quem escreveu e pediu pessoa — é um
+      // turno de resposta (#1984), então a janela que vale é a de `resposta_*`,
+      // não a de disparo. Sem isto, com a janela de resposta aberta a 3h, o
+      // aviso seria vetado pelo `outside_window` da janela de disparo fechada.
+      resposta: true,
       // Ver `GateContext.spinningEnforced`: com o gate armado, a terceira pessoa
       // a ser escalada na mesma janela do número receberia silêncio — pelo
       // guardrail. Este é o ÚNICO chamador que o desarma.

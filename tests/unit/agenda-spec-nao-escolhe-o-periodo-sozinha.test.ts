@@ -76,6 +76,13 @@ const CHAMADAS = [
  * período nenhum.
  */
 const DISPENSADAS: Record<string, string> = {
+  "agenda-primeira-pintura-no-fuso.spec.ts":
+    "não escolhe dia nem bloco — mede QUAL SEMANA o servidor pinta antes da hidratação, e " +
+    "por isso não pode navegar: `irParaASemanaSeguinte` precisa da página viva, que esta " +
+    "spec desliga de propósito (bloqueia os pacotes da aplicação). O que ela lê das colunas " +
+    "é a CHAVE do dia — comparada com a semana daquele fuso no mesmo instante —, nunca " +
+    "disponibilidade: nenhuma asserção depende de haver vaga, de que dia é hoje ou da hora. " +
+    "⚠️ A dispensa VENCE se ela passar a afirmar algo sobre horário livre ou bloco clicável.",
   "agenda-portao-de-hidratacao.spec.ts":
     "não escolhe dia nem bloco — ela mede o PORTÃO de hidratação do próprio módulo do " +
     "período (`aguardarGradeHidratada`), e por isso não pode passar por " +

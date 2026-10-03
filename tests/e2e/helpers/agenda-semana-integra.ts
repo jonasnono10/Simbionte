@@ -148,12 +148,34 @@ export async function irParaASemanaSeguinte(page: Page): Promise<string[]> {
   await aguardarGradeHidratada(page);
   const antes = await diasDesenhados(page);
 
+  // ⚠️ O DISCRIMINANTE VAI NA MENSAGEM, JÁ CALCULADO. Este vermelho tem duas
+  // causas possíveis, e elas pedem consertos opostos; sem o discriminante no
+  // log, quem tria refaz a aritmética de fuso no meio da noite — foi o que
+  // aconteceu, e custou três diagnósticos errados antes de alguém olhar o
+  // relógio.
+  //
+  // Os dois números são a semana que a TELA pintou e o domingo pelo relógio do
+  // NAVEGADOR. Nenhum deles é o relógio deste processo: além de a cerca do
+  // módulo proibir (é dele que veio o defeito original), ele deixou de
+  // descrever o servidor desde que a página passa a resolver o fuso de quem
+  // olha (#1350) — a mensagem envelheceria acusando a coisa errada.
+  const semanaDoNavegador = await domingoDoRelogio(page);
+  const suspeita =
+    (antes[0] ?? "") === semanaDoNavegador
+      ? "a tela pintou a semana do próprio navegador → suspeite da hidratação (a leitura " +
+        "ou o clique chegaram antes de o React assumir)"
+      : "a tela pintou uma semana que NÃO é a do relógio do navegador → suspeite do fuso: " +
+        "a pintura veio de um relógio e a comparação, de outro (ver #1350)";
+
   await page.getByTestId("periodo-seguinte").click();
 
   await expect
     .poll(async () => (await diasDesenhados(page))[0] ?? "", {
       timeout: 20_000,
-      message: "a grade não trocou de semana depois do clique em `periodo-seguinte`",
+      message:
+        "a grade não trocou de semana depois do clique em `periodo-seguinte` " +
+        `(lido antes do clique: ${antes[0] ?? "—"}; domingo pelo relógio do navegador: ` +
+        `${semanaDoNavegador}; ${suspeita})`,
     })
     .not.toBe(antes[0] ?? "");
 
@@ -207,6 +229,16 @@ export async function irParaASemanaDoCompromisso(page: Page, instanteISO: string
   return dia;
 }
 
+/** O mesmo, calculado DENTRO do navegador — que pode estar em outro fuso. */
+async function domingoDoRelogio(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay());
+    const dd = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`;
+  });
+}
+
 /** Os dias que a grade desenha AGORA, lidos da própria tela. */
 export async function diasDesenhados(page: Page): Promise<string[]> {
   return (
@@ -242,16 +274,40 @@ export async function escolherDiaDesenhado(page: Page, dias: readonly string[]):
   // varredura feita antes disso leria "nenhum dia da semana desenhada" onde há.
   await expect(
     page.locator('[data-testid^="dia-"][data-disponivel="true"]').first(),
-    "nenhum dia disponível no painel — o seed da agenda não deixou jornada publicada",
+    "nenhum dia disponível no painel — o seed da agenda não deixou jornada publicada, ou o " +
+      "painel abriu num mês sem vaga (fim de mês: ver `agenda-painel-abre-no-mes-com-vaga.test.tsx`)",
   ).toBeVisible({ timeout: 20_000 });
 
   let candidatos = await disponiveis();
   if (candidatos.length === 0) {
     await page.getByTestId("mes-seguinte").click();
-    await expect(
-      page.locator('[data-testid^="dia-"][data-disponivel="true"]').first(),
-      "nem o mês seguinte oferece dia — a consulta deveria ter pedido o mês visível",
-    ).toBeVisible({ timeout: 20_000 });
+    // ⚠️ ESPERA PELOS DIAS DA SEMANA DESENHADA, não por "algum dia disponível".
+    //
+    // O mês visível mora em DOIS estados: o `mes` do painel, que o clique troca
+    // na hora, e o `mesDoPainel` do `_client.tsx`, que decide a consulta e só
+    // troca no efeito `onMesVisivel`. No meio há um quadro com o mês novo na tela
+    // e os horários do mês VELHO por baixo — e a janela do mês velho vai até
+    // `endOfMonth + 1 dia` (`janelaDoMesVisivel`), então traz o dia 1º aceso
+    // sozinho. A espera antiga passava nesse quadro e a varredura lia só o dia 1º.
+    // Medido no trace do run 36292363538 (27/09 ~04h UTC, semana desenhada
+    // 04–10/out, 1º de outubro numa quinta): snapshot com só `dia-2026-10-01`
+    // disponível, `toBeVisible` verde em 2 ms, varredura vazia 17 ms depois, e o
+    // GET de outubro ainda pendente quando a spec reprovou.
+    //
+    // Nem a RESPOSTA do mês novo serve de portão: a chave de um mês futuro não
+    // depende de `agora`, e com o `staleTime` de 30 s o mês volta do cache sem
+    // requisição nenhuma (medido: `agenda-remarcar-e-cancelar`, que marca e
+    // remarca no mesmo mês, esperou 20 s por uma resposta que não vinha). O que
+    // não depende de rede nem de cache é o próprio critério: algum dia da semana
+    // desenhada aceso. O quadro de transição não acende nenhum deles.
+    await expect
+      .poll(disponiveis, {
+        timeout: 20_000,
+        message:
+          `nenhum dia da semana desenhada (${dias.join(", ")}) ficou disponível no painel ` +
+          "depois de avançar o mês — o alvo e a grade deixariam de falar do mesmo período",
+      })
+      .not.toEqual([]);
     candidatos = await disponiveis();
   }
 
@@ -316,8 +372,9 @@ async function diasCheios(page: Page): Promise<string[]> {
 
   await expect(
     page.locator('[data-testid^="dia-"][data-disponivel="true"]').first(),
-    "nenhum dia disponível — o seed da agenda não deixou jornada publicada, e sem " +
-      "dia clicável a coluna de horários nunca abre (o defeito ficaria invisível)",
+    "nenhum dia disponível — o seed da agenda não deixou jornada publicada, ou o painel " +
+      "abriu num mês sem vaga (fim de mês: ver `agenda-painel-abre-no-mes-com-vaga.test.tsx`); " +
+      "sem dia clicável a coluna de horários nunca abre (o defeito ficaria invisível)",
   ).toBeVisible({ timeout: 20_000 });
 
   const cheios = await varrer();
@@ -328,10 +385,18 @@ async function diasCheios(page: Page): Promise<string[]> {
   // mês em tela. Sem este passo as specs reprovariam nos dias 30/31 — a mesma
   // classe de vermelho-por-calendário que este módulo existe para fechar.
   await page.getByTestId("mes-seguinte").click();
-  await expect(
-    page.locator('[data-testid^="dia-"][data-disponivel="true"]').first(),
-    "nem o mês seguinte oferece dia — a consulta deveria ter pedido o mês visível",
-  ).toBeVisible({ timeout: 20_000 });
+  // ⚠️ ESPERA PELO PRÓPRIO CRITÉRIO, não por "algum dia disponível" — a mesma
+  // corrida que `escolherDiaDesenhado` já fechou: logo depois do clique há um
+  // quadro com o mês novo na tela e os horários do mês VELHO por baixo, e um
+  // `toBeVisible` passa nele antes de a varredura ler o mês novo vazio. Medido
+  // no último dia de setembro (30/09, ~01h43 e ~02h10 UTC, na `main` e no #1938):
+  // "nenhum dia FUTURO disponível" com a espera antiga verde.
+  await expect
+    .poll(varrer, {
+      message: "nem o mês seguinte oferece dia futuro — a consulta deveria ter pedido o mês visível",
+      timeout: 20_000,
+    })
+    .not.toEqual([]);
   return varrer();
 }
 

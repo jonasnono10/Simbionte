@@ -148,28 +148,49 @@ describe("remetente", () => {
     process.env.RESEND_FROM_EMAIL = "";
     const { fromAddress } = await import("@/lib/email/resend");
 
-    expect(fromAddress("Vendas Turbo")).toBeNull();
+    expect(fromAddress(process.env.RESEND_FROM_EMAIL ?? null, "Vendas Turbo")).toBeNull();
   });
 
   it("o endereço é do operador e o NOME é da marca", async () => {
     process.env.RESEND_FROM_EMAIL = "nao-responda@revenda.com.br";
     const { fromAddress } = await import("@/lib/email/resend");
 
-    expect(fromAddress("Vendas Turbo")).toBe("Vendas Turbo <nao-responda@revenda.com.br>");
+    expect(fromAddress("nao-responda@revenda.com.br", "Vendas Turbo")).toBe(
+      "Vendas Turbo <nao-responda@revenda.com.br>",
+    );
     // Sem marca não se inventa uma: sai o endereço puro.
-    expect(fromAddress()).toBe("nao-responda@revenda.com.br");
+    expect(fromAddress("nao-responda@revenda.com.br")).toBe("nao-responda@revenda.com.br");
   });
 
   it("nome de marca não injeta cabeçalho SMTP", async () => {
     process.env.RESEND_FROM_EMAIL = "nao-responda@revenda.com.br";
     const { fromAddress } = await import("@/lib/email/resend");
 
-    const sujo = fromAddress('Acme" <evil@x.com>\r\nBcc: vitima@y.com');
+    const sujo = fromAddress(
+      "nao-responda@revenda.com.br",
+      'Acme" <evil@x.com>\r\nBcc: vitima@y.com',
+    );
     expect(sujo).not.toContain("\r");
     expect(sujo).not.toContain("\n");
     // `<`, `>`, `"` e as quebras somem; o resto do texto fica, colado — o que
     // importa é que não sobrou cabeçalho nenhum para o SMTP interpretar.
     expect(sujo).toBe("Acme evil@x.comBcc: vitima@y.com <nao-responda@revenda.com.br>");
+  });
+
+  it("ENDEREÇO com caractere de cabeçalho é recusado — ele virou entrada de tela na 0341", async () => {
+    // Enquanto o endereço vinha só do `.env`, mexer nele exigia SSH: quem podia
+    // já tinha o servidor. Desde a 0341 ele vem de um campo do painel, e um
+    // `\r\n` aqui emenda um cabeçalho novo no `From:` — um `Bcc:` para terceiro,
+    // por exemplo. RECUSA em vez de limpar: endereço com caractere de cabeçalho
+    // não é endereço a consertar, é endereço a não usar.
+    const { fromAddress } = await import("@/lib/email/resend");
+
+    expect(fromAddress("ok@x.com\r\nBcc: vitima@y.com")).toBeNull();
+    expect(fromAddress("ok@x.com\nBcc: vitima@y.com")).toBeNull();
+    expect(fromAddress('"<evil@x.com>')).toBeNull();
+    expect(fromAddress("a@x.com, b@y.com")).toBeNull();
+    // controle positivo: o endereço legítimo continua passando
+    expect(fromAddress("ok@x.com")).toBe("ok@x.com");
   });
 
   it("chave configurada mas remetente vazio = NÃO CONFIGURADO, não envio quebrado", async () => {
@@ -180,7 +201,7 @@ describe("remetente", () => {
     process.env.RESEND_FROM_EMAIL = "";
     const { sendEmail, isEmailConfigured } = await import("@/lib/email/resend");
 
-    expect(isEmailConfigured()).toBe(false);
+    expect(await isEmailConfigured()).toBe(false);
     const r = await sendEmail({ to: "a@b.com", subject: "s", html: "<p>x</p>" });
     expect(r).toEqual({ ok: false, error: "not_configured" });
   });
