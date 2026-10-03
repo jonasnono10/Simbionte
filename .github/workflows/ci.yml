@@ -584,6 +584,8 @@ jobs:
         # consultas/hora por IP — o executor próprio é um IP só.
         env:
           GH_TOKEN: ${{ github.token }}
+          # O fork integra o produto, mas a release publicada e sua tag vivem no upstream.
+          GH_REPO: melgarafael/DeskcommCRM
         run: pnpm test:db
 
       # O `update.sh` do cliente roda sobre um banco COM DADOS, e nenhum gate
