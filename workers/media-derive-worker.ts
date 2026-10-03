@@ -15,13 +15,18 @@ import { createPool } from "@/lib/agent-engine/db/pool";
 import { env } from "@/lib/env";
 import type { EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
 import { deriveMediaText, type DeriveDeps } from "@/lib/messaging/media/derive";
-import { TIPOS_DERIVAVEIS } from "@/lib/messaging/media/derivable";
+import { MARCADOR_NAO_LIDA, TIPOS_DERIVAVEIS } from "@/lib/messaging/media/derivable";
 import { deriveVideoText } from "@/lib/messaging/media/video-derive";
-import { apiTranscriptionProvider } from "@/lib/messaging/media/transcription";
+import {
+  apiTranscriptionProvider,
+  idiomasDaTranscricao,
+  modeloDeTranscricaoEmVigor,
+} from "@/lib/messaging/media/transcription";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { motivoDaRecusaDeDestino } from "@/lib/automation/destinos-internos-autorizados";
 import { DETALHE_TECNICO } from "@/lib/event-log/aviso-de-evento-morto";
+import { MENSAGEM_REDIGIDA } from "@/lib/lgpd/cascata";
 
 export const MEDIA_DERIVE_CONSUMER_KEY = "media_derive_v1";
 const DRAIN_MAX_ATTEMPTS = 5; // espelho de lib/event-log/drain.ts
@@ -63,7 +68,20 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   if (error) return { consumer_key, status: "error", detail: error.message };
 
   const msg = data as MessageRow | null;
-  if (!msg?.media_storage_path) return { consumer_key, status: "skipped", detail: "no media" };
+  if (!msg) return { consumer_key, status: "skipped", detail: "no media" };
+
+  // Desistir DE PROPÓSITO grava `skipped` (terminal em DERIVACAO_TERMINADA).
+  // Sem a marca, a linha ficava com status null para sempre e o drain do turno,
+  // que espera a mídia da CONVERSA, segurava a resposta do texto seguinte até o
+  // teto de 120s por uma leitura que nunca ia acontecer.
+  const markSkipped = async (detail: string): Promise<HandlerResult> => {
+    await admin.from("messages")
+      .update({ media_derived_status: "skipped" })
+      .eq("id", msg.id).eq("organization_id", msg.organization_id);
+    return { consumer_key, status: "skipped", detail };
+  };
+
+  if (!msg.media_storage_path) return markSkipped("no media");
   if (msg.media_derived_status === "ready") return { consumer_key, status: "skipped", detail: "already derived" };
   if (!TIPOS_DERIVAVEIS.has(msg.type)) return { consumer_key, status: "skipped", detail: `type ${msg.type}` };
   // Vídeo é opt-in (custo: ffmpeg + N chamadas de visão): só deriva se algum agente
@@ -77,7 +95,7 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       .eq("video_frames_enabled", true)
       .limit(1)
       .maybeSingle();
-    if (!flag) return { consumer_key, status: "skipped", detail: "video_frames_disabled" };
+    if (!flag) return markSkipped("video_frames_disabled");
   }
 
   /** O que o operador chama de "isto" — o aviso não pode falar em `msg.type`. */
@@ -124,7 +142,6 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       openrouterApiKey: process.env.OPENROUTER_API_KEY,
       cacheTtl: "1h",
     };
-    let llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
 
     // ─── O painel de provedores manda AQUI também ────────────────────────────
     //
@@ -136,6 +153,12 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     // modelo padrão. É textualmente a classe de defeito que
     // `lib/ai/gateway-binding.ts` declara ter vindo matar — três pontos foram
     // fechados e este ficou igual.
+    //
+    // ⚠️ Resolver primeiro o padrão da organização falha quando a org não tem
+    // credencial padrão (ex.: onboarding com google/gemini sem chave), mesmo com
+    // `visao_de_imagem` configurado e ativo com OpenAI/Anthropic (#1591). Por
+    // isso, tentamos primeiro o binding de visão; se ele não existir ou falhar,
+    // caímos no padrão da organização.
     const bindingDaVisao = await lerBindingDoPonto(admin, row.organization_id, "visao_de_imagem");
     // A `base_url` do binding de visão, para descer até o factory do provedor.
     //
@@ -149,6 +172,8 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     // binding funcionava no chat. Um caminho só: a base_url lida aqui é a mesma
     // que o turno usa.
     let baseUrlDaVisao: string | null = null;
+    let llm: Awaited<ReturnType<typeof resolveOrgLlmConfig>> | null = null;
+
     if (bindingDaVisao) {
       try {
         const comBinding = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id, {
@@ -169,6 +194,10 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    if (!llm) {
+      llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
     }
 
     // A transcrição é SEMPRE do Whisper (api.openai.com), então precisa de uma
@@ -221,9 +250,30 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     const deps = buildDeriveDeps(llm, openaiKey, row.organization_id, admin, baseUrlDaVisao, chaveEhDaInstalacao);
 
     const text = await deriveMediaText(msg.type, buffer, msg.media_mime ?? "application/octet-stream", deps);
-    await admin.from("messages")
+
+    // ─── LGPD: nunca gravar transcrição em mensagem já redigida (#1991) ────
+    //
+    // A anonimização apaga o body (vira `'[mensagem anonimizada]'`) e zera a
+    // mídia. Se a virada acontece ENTRE a leitura desta mensagem e esta
+    // gravação, a linha já está redigida — e este UPDATE regravaria o
+    // `media_derived_text` que a cascata LGPD mandou zerar (a varredura diária
+    // do passo 9 só alcança em D+1). A guarda `body IS DISTINCT FROM '[...]'`
+    // faz o PostgREST casar ZERO linhas; conferimos o resultado para não
+    // devolver "ok" sobre uma escrita que o banco recusou.
+    //
+    // `isdistinct`, nunca `neq`: áudio sem legenda tem body NULL, e
+    // `NULL <> '...'` é NULL — o `neq` recusaria TODA nota de voz.
+    const { data: gravados, error: erroDaGravacao } = await admin
+      .from("messages")
       .update({ media_derived_text: text, media_derived_status: "ready" })
-      .eq("id", msg.id).eq("organization_id", msg.organization_id);
+      .eq("id", msg.id)
+      .eq("organization_id", msg.organization_id)
+      .filter("body", "isdistinct", MENSAGEM_REDIGIDA)
+      .select("id");
+    if (erroDaGravacao) return { consumer_key, status: "error", detail: erroDaGravacao.message };
+    if (!gravados || gravados.length === 0) {
+      return { consumer_key, status: "skipped", detail: "message_redacted" };
+    }
     return { consumer_key, status: "ok" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -453,8 +503,22 @@ function buildDeriveDeps(
   // `model`, e o worker nunca os passava: quem tinha Groq/Whisper próprio
   // continuava batendo em api.openai.com com `whisper-1`. Sem
   // `TRANSCRIPTION_API_KEY` o comportamento é exatamente o de antes.
+  //
+  // `TRANSCRIPTION_MODEL` e `TRANSCRIPTION_LANGUAGES` valem TAMBÉM aqui, com a
+  // chave da OpenAI da organização: trocar `whisper-1` por um modelo melhor da
+  // própria OpenAI não pode exigir copiar a chave para o `.env`. O MODELO só
+  // vale aqui com `TRANSCRIPTION_BASE_URL` vazio (ver `modeloDeTranscricaoEmVigor`).
+  const idiomas = idiomasDaTranscricao(env.TRANSCRIPTION_LANGUAGES);
   const transcricaoPadrao: DeriveDeps["transcriber"] = openaiKey
-    ? apiTranscriptionProvider({ apiKey: openaiKey })
+    ? apiTranscriptionProvider({
+        apiKey: openaiKey,
+        model: modeloDeTranscricaoEmVigor({
+          model: env.TRANSCRIPTION_MODEL,
+          apiKey: env.TRANSCRIPTION_API_KEY,
+          baseUrl: env.TRANSCRIPTION_BASE_URL,
+        }),
+        languages: idiomas,
+      })
     : semTranscricao;
   // O endereço do serviço de transcrição vem do .env da instalação e a chamada
   // leva a chave no cabeçalho: mesma recusa do endereço da visão, e antes de a
@@ -493,6 +557,7 @@ function buildDeriveDeps(
           apiKey: chaveDeTranscricao,
           baseUrl: env.TRANSCRIPTION_BASE_URL || undefined,
           model: env.TRANSCRIPTION_MODEL || undefined,
+          languages: idiomas,
         }),
       )
     : transcricaoPadrao;
@@ -505,16 +570,9 @@ function buildDeriveDeps(
   };
 }
 
-/**
- * O texto que substitui a string vazia quando a mídia não pôde ser lida.
- *
- * Não é cosmético: o agente recebe este texto como derivado da mensagem, então
- * ele passa a SABER que chegou algo que não conseguiu interpretar, em vez de
- * concluir que a mensagem veio vazia. A diferença aparece na resposta ao
- * cliente — "não consegui abrir sua foto, pode me dizer o que é?" no lugar de
- * um silêncio que parece descaso.
- */
-export const MARCADOR_NAO_LIDA = "[o cliente enviou uma mídia que não consegui interpretar]";
+// Mora em lib/messaging/media/derivable.ts (sem import nenhum) porque o balão
+// da inbox também precisa dele para não exibir o aviso como transcrição.
+export { MARCADOR_NAO_LIDA };
 
 /**
  * Abre UM aviso na Central por organização enquanto o problema durar.

@@ -49,6 +49,12 @@ const PARES: Array<{
   simbolo: string;
 }> = [
   {
+    tabela: "ad_platform_connections",
+    coluna: "google_api",
+    arquivo: "lib/plataformas-de-anuncio/types.ts",
+    simbolo: "ApiDeConversaoGoogle",
+  },
+  {
     tabela: "extension_operations",
     coluna: "kind",
     // O recibo das extensões (0271). Quatro cópias no TypeScript viraram uma; um kind
@@ -283,6 +289,36 @@ const PARES: Array<{
     arquivo: "lib/tarefas/tipos.ts",
     simbolo: "SITUACOES_DA_TAREFA",
   },
+  // Módulo VoIP (0347/0348) — status fica de fora: é vocabulário de terceiro
+  // (binário WaCalls, compartilhado), mapeado na API — não é 1:1 com TS aqui.
+  {
+    tabela: "voice_calls",
+    coluna: "direction",
+    // lib/voip/call-vocabulary.ts -> CallDirection
+    arquivo: "lib/voip/call-vocabulary.ts",
+    simbolo: "CallDirection",
+  },
+  {
+    tabela: "voice_calls",
+    coluna: "handled_by",
+    // lib/voip/call-vocabulary.ts -> CallHandledBy
+    arquivo: "lib/voip/call-vocabulary.ts",
+    simbolo: "CallHandledBy",
+  },
+  {
+    tabela: "phone_numbers",
+    coluna: "routing_mode",
+    // lib/voip/call-vocabulary.ts -> PhoneNumberRoutingMode
+    arquivo: "lib/voip/call-vocabulary.ts",
+    simbolo: "PhoneNumberRoutingMode",
+  },
+  {
+    tabela: "ai_agents",
+    coluna: "channel",
+    // lib/voip/call-vocabulary.ts -> AiAgentChannel
+    arquivo: "lib/voip/call-vocabulary.ts",
+    simbolo: "AiAgentChannel",
+  },
   {
     tabela: "agent_case_chat_messages",
     coluna: "author_kind",
@@ -299,6 +335,15 @@ const PARES: Array<{
     // seria a pergunta sumir em vez de a resposta falhar.
     arquivo: "lib/ai/conversa-do-caso/vocabulario.ts",
     simbolo: "CASE_CHAT_AUTHOR_KINDS",
+  },
+  {
+    tabela: "knowledge_searches",
+    coluna: "author_kind",
+    // lib/ai/knowledge/busca.ts → KNOWLEDGE_SEARCH_AUTHOR_KINDS (tupla `as const`).
+    // Nasce com a migration 0484 (#1877): a rota da caixa "Acervo" grava
+    // `'human'` e a Evolução separa as séries por esta coluna.
+    arquivo: "lib/ai/knowledge/busca.ts",
+    simbolo: "KNOWLEDGE_SEARCH_AUTHOR_KINDS",
   },
   {
     tabela: "passagens_de_atendimento",
@@ -376,6 +421,18 @@ const PARES: Array<{
     // nasce com o par no mesmo commit da migration — a lição desta lista.
     arquivo: "lib/schemas/team.ts",
     simbolo: "ROLES",
+  },
+  {
+    tabela: "organizations",
+    coluna: "suspended_kind",
+    // lib/organizacao/operante.ts → TIPOS_DE_SUSPENSAO (tupla `as const`). Nasce
+    // no MESMO commit da migration 0501 — a lição desta lista. O tipo decide qual
+    // porta reativa: `/reactivate` só a administrativa; a de cobrança só por
+    // pagamento, prazo ou isenção. Um tipo só no CHECK deixaria a org presa numa
+    // suspensão que nenhuma porta reconhece; só no TypeScript viraria `23514`
+    // dentro de fn_suspender_organizacao.
+    arquivo: "lib/organizacao/operante.ts",
+    simbolo: "TIPOS_DE_SUSPENSAO",
   },
 ];
 

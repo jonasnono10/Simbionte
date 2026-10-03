@@ -85,7 +85,7 @@ export async function transporteDeEmail(): Promise<TransporteDeEmail> {
 
 /** Existe algum caminho capaz de entregar? Usado por tela, nunca por envio. */
 export async function emailConfigurado(): Promise<boolean> {
-  return (await transporteDeEmail()) === "smtp" ? true : resendConfigurada();
+  return (await transporteDeEmail()) === "smtp" ? true : await resendConfigurada();
 }
 
 /**
@@ -99,7 +99,12 @@ export async function emailConfigurado(): Promise<boolean> {
  */
 export async function transporteEmVigor(): Promise<TransporteDeEmail | "nenhum"> {
   if ((await transporteDeEmail()) === "smtp") return "smtp";
-  return resendConfigurada() ? "resend" : "nenhum";
+  // `await` OBRIGATÓRIO: `isEmailConfigured` virou assíncrona quando a chave da
+  // Resend passou a vir do banco (migration 0341). Sem ele a condição testa a
+  // PROMESSA, que é sempre verdadeira — e a tela afirmaria "usando Resend" numa
+  // instalação sem e-mail nenhum configurado. O compilador pega (TS2801); o
+  // desfecho em tela seria silencioso.
+  return (await resendConfigurada()) ? "resend" : "nenhum";
 }
 
 export async function sendEmail(args: SendArgs): Promise<EmailSendResult> {

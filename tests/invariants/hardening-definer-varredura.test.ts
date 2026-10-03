@@ -67,6 +67,41 @@ const ANON_PERMITIDO: readonly Excecao[] = [];
  */
 const AUTHENTICATED_PERMITIDO: readonly Excecao[] = [
   {
+    fn: "fn_honorarios_parcela_pagar(uuid,uuid,uuid,uuid)",
+    razao:
+      "POST app/api/v1/honorarios/parcelas/[id]/pagar/route.ts usa createClient da " +
+      "sessão. Definer porque insere em financial_entries (fora da policy de escrita " +
+      "de honorarios_parcelas) e atualiza a parcela sob FOR UPDATE na mesma transação " +
+      "— exatamente o desenho de fn_finalizar_comanda logo abaixo, e pela mesma razão: " +
+      "sem o lock, dois cliques na mesma parcela liam 'pendente' nos dois e cada um " +
+      "lançava o SEU financial_entries, pagando em dobro no caixa. Exige " +
+      "fn_role_at_least(p_org, 'manager'), mesmo papel da RLS de honorarios_parcelas.",
+  },
+  {
+    fn: "fn_finalizar_comanda(uuid,uuid,uuid,integer)",
+    razao:
+      "POST app/api/v1/financeiro/comandas/[id]/finalizar/route.ts e " +
+      "app/api/v1/financeiro/comandas/faturar-lote/route.ts usam createClient da " +
+      "sessão — e aqui não é preferência, é requisito: a função começa por " +
+      "`auth.uid() is null` e recusa, então com a service key ela levanta " +
+      "`comanda_forbidden`. Definer porque as seis escritas (venda, item, comissão, " +
+      "lançamento na conta, ponto de fidelidade e conclusão do agendamento) têm de " +
+      "cair numa transação só, sob FOR UPDATE, e uma delas escreve em tabela que a " +
+      "policy do usuário não concede. A guarda de tenant é a mesma da casa: " +
+      "`fn_role_at_least(p_org, 'agent')` antes de qualquer escrita, e todo comando " +
+      "interno é fechado por organization_id.",
+  },
+  {
+    fn: "fn_estornar_comanda(uuid,uuid,text)",
+    razao:
+      "POST app/api/v1/financeiro/comandas/[id]/estornar/route.ts usa createClient da " +
+      "sessão. Estorno NÃO apaga: insere o contra-lançamento e carimba " +
+      "`reversed_at`, e é definer porque `fn_lancamento_pago_e_imutavel` fecha o " +
+      "UPDATE de lançamento pago para todo mundo — o caminho tem de ser este, e só " +
+      "este. Exige `fn_role_at_least(p_org, 'manager')`: desfazer dinheiro não é do " +
+      "mesmo papel que lançar.",
+  },
+  {
     fn: "fn_passagem_devolvida(uuid,uuid)",
     razao:
       "POST app/api/v1/conversations/[id]/reactivate-bot/route.ts usa createClient da " +
@@ -149,6 +184,16 @@ const AUTHENTICATED_PERMITIDO: readonly Excecao[] = [
       "negação agent/viewer/cross-org e ausência de efeito recusado.",
   },
   {
+    fn: "fn_definir_colegas_podem_mexer_na_agenda(uuid,boolean)",
+    razao:
+      "app/actions/settings/definirAgendaDosColegas.ts chama por rpc com o " +
+      "createClient da SESSÃO, e a própria função reconfere auth.uid(), " +
+      "manager, suporte de escrita e MFA comprovado antes de gravar. " +
+      "tests/invariants/agenda-presenca-acl.test.ts prova manager da própria " +
+      "org com fator provado e a negação de agent, viewer, sessão aal1, anon " +
+      "e da org vizinha, com a configuração intacta depois das recusas.",
+  },
+  {
     fn: "fn_definir_cliente_pela_agenda(uuid,boolean)",
     razao:
       "app/actions/settings/definirClientePelaAgenda.ts chama com createClient da sessão; " +
@@ -206,7 +251,7 @@ const AUTHENTICATED_PERMITIDO: readonly Excecao[] = [
       "função recusa tudo que não seja admin da própria organização.",
   },
   {
-    fn: "fn_vocabulario_de_tags_operar(uuid,text,text,text)",
+    fn: "fn_vocabulario_de_tags_operar(uuid,text,text,text,text)",
     razao:
       "POST app/api/v1/tags/vocabulario/route.ts chama com createClient da " +
       "sessão (a tela de Tags é manager+, com suporte de escrita e MFA). A " +
@@ -215,10 +260,15 @@ const AUTHENTICATED_PERMITIDO: readonly Excecao[] = [
       "organização e as ações add_tag de automation_rules numa transação só — é " +
       "essa atomicidade que impede o rename de deixar a regra do agente " +
       "apontando para o nome velho. " +
+      "A assinatura tem CINCO argumentos desde a 0336 (issue #1271): " +
+      "`p_cor text default null` para a ação `definir_cor`, que mexe só em " +
+      "organizations.settings.tags e sai antes dos laços (cor não mora nas " +
+      "linhas). " +
       "tests/invariants/tags-vocabulario.test.ts prova duas orgs com a MESMA " +
       "etiqueta (a de fora não é tocada), viewer recusado, anon sem EXECUTE, " +
       "junção 'vip'+'VIP' sem duplicata e exclusão que informa — sem apagar — a " +
-      "regra do agente.",
+      "regra do agente; tests/invariants/tags-cor-de-etiqueta.test.ts prova a " +
+      "cor.",
   },
 ];
 
