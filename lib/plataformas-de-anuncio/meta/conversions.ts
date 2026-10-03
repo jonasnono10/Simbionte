@@ -21,8 +21,9 @@
  *
  * 3. Identidade. Para conversão vinda de anúncio clique-para-WhatsApp, o
  *    `ctwa_clid` é o que liga a venda ao clique — é ele que carrega a atribuição,
- *    e o telefone hasheado só reforça. Sem o clique não há o que reportar, e é
- *    isso que o chamador chama de `sem_atribuicao`.
+ *    e o telefone hasheado só reforça. A exceção é quem veio de anúncio para
+ *    uma PÁGINA (UTM da Meta, sem clique): aí o telefone é a identidade, e a
+ *    origem declarada muda (ver abaixo). Sem nenhum dos dois, é recusa.
  *
  * ─── Por que `business_messaging` e não `website` ───────────────────────────
  *
@@ -36,6 +37,8 @@ import { createHash } from "node:crypto";
 
 import { VERSAO_PADRAO_DA_GRAPH } from "@/lib/graph-version";
 import { logger } from "@/lib/logger";
+
+import { baseDaGraphDeAnuncio } from "./graph-base";
 import type {
   ConversaoOffline,
   CredencialDeConversao,
@@ -79,6 +82,8 @@ async function enviar(
   credencial: CredencialDeConversao,
   conversao: ConversaoOffline,
 ): Promise<ResultadoDeEnvio> {
+  if (conversao.evento !== "Purchase" || conversao.valorCentavos === null)
+    return { tipo: "permanente", detalhe: "Este transporte aceita apenas compras com valor." };
   const idadeMs = Date.now() - conversao.ocorridoEm.getTime();
   if (idadeMs > IDADE_MAXIMA_MS) {
     const dias = Math.floor(idadeMs / (24 * 60 * 60 * 1000));
@@ -90,12 +95,29 @@ async function enviar(
     };
   }
 
-  const userData: Record<string, unknown> = {
-    ctwa_clid: conversao.cliqueDeOrigem,
-  };
+  // Com clique: anúncio clique-para-WhatsApp, `business_messaging` + `ctwa_clid`.
+  // Sem clique: a pessoa veio de anúncio para a PÁGINA e a venda fechou no CRM.
+  // `business_messaging` sem `ctwa_clid` é recusado, e `website` exige dados do
+  // navegador que o CRM não tem — `system_generated` é a origem declarada para
+  // venda registrada em sistema, casada pelo telefone em hash.
+  const comClique = conversao.cliqueDeOrigem.trim() !== "";
+  if (!comClique && !conversao.telefone) {
+    return {
+      tipo: "permanente",
+      detalhe:
+        "Sem o clique do anúncio e sem telefone no contato, a Meta não tem como reconhecer o cliente.",
+    };
+  }
+
+  const userData: Record<string, unknown> = comClique ? { ctwa_clid: conversao.cliqueDeOrigem } : {};
   // Array de propósito: o formato aceita múltiplos valores por campo, e mandar
   // string crua onde ele espera lista é aceito com aviso e ignorado no match.
   if (conversao.telefone) userData.ph = [hash(conversao.telefone)];
+
+  const customData: Record<string, unknown> = {
+    value: conversao.valorCentavos / 100,
+    currency: conversao.moeda.toUpperCase(),
+  };
 
   const corpo: Record<string, unknown> = {
     data: [
@@ -105,21 +127,18 @@ async function enviar(
         // futuro, e a resposta é 200 — some sem erro.
         event_time: Math.floor(conversao.ocorridoEm.getTime() / 1000),
         event_id: conversao.eventoId,
-        action_source: "business_messaging",
-        messaging_channel: "whatsapp",
+        ...(comClique
+          ? { action_source: "business_messaging", messaging_channel: "whatsapp" }
+          : { action_source: "system_generated" }),
         user_data: userData,
-        custom_data: {
-          value: conversao.valorCentavos / 100,
-          currency: conversao.moeda.toUpperCase(),
-        },
+        custom_data: customData,
       },
     ],
   };
   if (credencial.testEventCode) corpo.test_event_code = credencial.testEventCode;
 
   const url =
-    `https://graph.facebook.com/${VERSAO_DA_API}/` +
-    `${encodeURIComponent(credencial.datasetId)}/events`;
+    `${baseDaGraphDeAnuncio()}/${encodeURIComponent(credencial.datasetId)}/events`;
 
   let resposta: Response;
   try {
@@ -141,7 +160,18 @@ async function enviar(
     };
   }
 
-  if (resposta.ok) return { tipo: "ok" };
+  if (resposta.ok) {
+    const corpo: unknown = await resposta.json().catch(() => null);
+    if (
+      corpo &&
+      typeof corpo === "object" &&
+      "events_received" in corpo &&
+      corpo.events_received === 1
+    ) {
+      return { tipo: "ok" };
+    }
+    return { tipo: "transitorio", detalhe: "A plataforma não confirmou o recebimento do evento." };
+  }
 
   const texto = await resposta.text().catch(() => "");
   let codigo: number | null = null;
@@ -160,7 +190,7 @@ async function enviar(
     leadId: conversao.leadId,
   });
 
-  if (resposta.status >= 500) {
+  if (resposta.status === 429 || resposta.status >= 500) {
     return { tipo: "transitorio", detalhe: `${resposta.status}: ${mensagem}` };
   }
   return classifica4xx(codigo, mensagem);

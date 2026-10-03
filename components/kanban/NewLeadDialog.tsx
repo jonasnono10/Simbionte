@@ -1,5 +1,6 @@
 "use client";
 
+import { useActiveOrg } from "@/hooks/auth/AuthProvider";
 import { useT } from "@/hooks/i18n/useT";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -26,7 +27,7 @@ import {
 import { useCreateLead } from "@/hooks/kanban/useCreateLead";
 import type { Stage } from "@/lib/kanban/types";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
-import { parseReaisToCents } from "@/lib/money";
+import { MOEDA_PADRAO, parseReaisToCents, simboloDaMoeda } from "@/lib/money";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import type { Contact } from "@/lib/types/contacts";
 import { EcoDoValor } from "./EcoDoValor";
@@ -66,6 +67,9 @@ export function NewLeadDialog({
   onCreated,
 }: Props) {
   const t = useT();
+  const org = useActiveOrg();
+  // Negócio NOVO nasce na moeda da organização (createLeadHandler).
+  const moedaDoValor = org?.currency ?? MOEDA_PADRAO;
   const create = useCreateLead(pipelineId);
   const initialStage = useMemo(() => defaultStageId(stages), [stages]);
   // Quem abre o diálogo já sabendo o contato (Inbox) não escolhe de novo.
@@ -115,7 +119,7 @@ export function NewLeadDialog({
     if (reais.length > 0) {
       valueCents = parseReaisToCents(reais);
       if (valueCents === null) {
-        form.setError("valueReais", { message: "Valor inválido" });
+        form.setError("valueReais", { message: t("Valor inválido") });
         return;
       }
     }
@@ -124,7 +128,10 @@ export function NewLeadDialog({
       pipeline_id: pipelineId,
       stage_id: values.stage_id,
       title: values.title.trim(),
-      currency: "BRL",
+      // A moeda NÃO vai daqui. O browser não sabe a moeda da organização, e
+      // mandar "BRL" fazia toda instalação em peso ou dólar cadastrar lead em
+      // real. Omitir é o conserto: quem decide é o servidor, que lê a
+      // organização (`moedaDaOrganizacao`, em `createLeadHandler`).
       source: "manual",
       tags,
     };
@@ -199,7 +206,7 @@ export function NewLeadDialog({
             <Label htmlFor="title">{t("Título")}</Label>
             <Input
               id="title"
-              placeholder="Ex: Pedido Maria — combo presente"
+              placeholder={t("Ex: Pedido Maria — combo presente")}
               {...form.register("title", { required: true, minLength: 2 })}
             />
           </div>
@@ -237,14 +244,16 @@ export function NewLeadDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="valueReais">Valor (R$)</Label>
+              {/* Negócio novo: o rótulo segue a moeda da organização, que é onde ele
+                  vai nascer. `R$` em duro mentia para quem opera em euro. */}
+              <Label htmlFor="valueReais">{t("Valor")} ({simboloDaMoeda(moedaDoValor)})</Label>
               <Input
                 id="valueReais"
                 inputMode="decimal"
                 placeholder="0,00"
                 {...form.register("valueReais")}
               />
-              <EcoDoValor control={form.control} />
+              <EcoDoValor control={form.control} moeda={moedaDoValor} />
               {form.formState.errors.valueReais && (
                 <p className="text-xs text-error-fg">
                   {form.formState.errors.valueReais.message}
@@ -277,10 +286,10 @@ export function NewLeadDialog({
               onClick={() => onOpenChange(false)}
               disabled={create.isPending}
             >
-              Cancelar
+              {t("Cancelar")}
             </Button>
             <Button type="submit" disabled={create.isPending || !stageId}>
-              {create.isPending ? "Criando…" : "Criar lead"}
+              {create.isPending ? t("Criando…") : t("Criar lead")}
             </Button>
           </DialogFooter>
         </form>
