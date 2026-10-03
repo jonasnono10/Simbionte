@@ -1,13 +1,7 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { traduzir } from "@/lib/i18n/dicionario";
 import type { Idioma } from "@/lib/i18n/idiomas";
 import type {
@@ -52,9 +46,9 @@ function CardDeNumero({
   href,
   idioma,
 }: {
-  titulo: string;
+  titulo: React.ReactNode;
   numero: NumeroDoCockpit;
-  detalhe: string;
+  detalhe: React.ReactNode;
   href: string;
   idioma: Idioma;
 }) {
@@ -62,14 +56,14 @@ function CardDeNumero({
   return (
     <Card>
       <CardContent className="space-y-2 p-4">
-        <p className="text-xs font-medium text-text-muted">{t(titulo)}</p>
+        <p className="text-xs font-medium text-text-muted">{titulo}</p>
         <p className="text-2xl font-semibold tabular-nums">
           {numero.estado === "disponivel"
             ? numero.valor?.toLocaleString(idioma === "es" ? "es" : "pt-BR")
             : "—"}
         </p>
         <p className="text-xs text-text-muted">
-          {numero.estado === "disponivel" ? t(detalhe) : t("Fonte indisponível agora")}
+          {numero.estado === "disponivel" ? detalhe : t("Fonte indisponível agora")}
         </p>
         <LinkDaSecao href={href}>{t("Ver detalhes")}</LinkDaSecao>
       </CardContent>
@@ -77,12 +71,11 @@ function CardDeNumero({
   );
 }
 
-function AvisoDeFonte({ texto, idioma }: { texto: string; idioma: Idioma }) {
-  const t = (chave: string) => traduzir(chave, idioma);
+function AvisoDeFonte({ texto }: { texto: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-warning-fg/20 bg-warning-bg p-3 text-sm text-warning-fg">
       <Warning aria-hidden className="mt-0.5 shrink-0" size={16} />
-      <p>{t(texto)}</p>
+      <p>{texto}</p>
     </div>
   );
 }
@@ -163,8 +156,8 @@ function Placeholder({
   icone: Icon,
   idioma,
 }: {
-  titulo: string;
-  descricao: string;
+  titulo: React.ReactNode;
+  descricao: React.ReactNode;
   icone: typeof Sparkle;
   idioma: Idioma;
 }) {
@@ -175,10 +168,10 @@ function Placeholder({
         <div className="flex items-center gap-2">
           <Icon aria-hidden className="text-text-muted" size={20} weight="duotone" />
           <CardTitle>
-            <h2>{t(titulo)}</h2>
+            <h2>{titulo}</h2>
           </CardTitle>
         </div>
-        <CardDescription>{t(descricao)}</CardDescription>
+        <CardDescription>{descricao}</CardDescription>
       </CardHeader>
       <CardContent>
         <Badge variant="neutral">{t("Disponível em próxima etapa")}</Badge>
@@ -204,7 +197,8 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
           </p>
         </div>
         <p className="text-xs text-text-muted">
-          {t("Atualizado em")} {new Date(model.gerado_em).toLocaleString(tag, {
+          {t("Atualizado em")}{" "}
+          {new Date(model.gerado_em).toLocaleString(tag, {
             dateStyle: "short",
             timeStyle: "short",
             timeZone: timezone,
@@ -221,30 +215,30 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <CardDeNumero
-            titulo="Na fila humana"
+            titulo={t("Na fila humana")}
             numero={model.resumo.fila_humana}
-            detalhe="Conversas que pedem uma pessoa agora"
+            detalhe={t("Conversas que pedem uma pessoa agora")}
             href="/app/inbox?filter=unassigned"
             idioma={idioma}
           />
           <CardDeNumero
-            titulo="Riscos críticos"
+            titulo={t("Riscos críticos")}
             numero={model.resumo.riscos_criticos}
-            detalhe="Classificação do Radar de Risco"
+            detalhe={t("Classificação do Radar de Risco")}
             href="/app/radar"
             idioma={idioma}
           />
           <CardDeNumero
-            titulo="Tarefas atrasadas"
+            titulo={t("Tarefas atrasadas")}
             numero={model.resumo.tarefas_atrasadas}
-            detalhe="Tarefas abertas com prazo vencido"
+            detalhe={t("Tarefas abertas com prazo vencido")}
             href="/app/tasks"
             idioma={idioma}
           />
           <CardDeNumero
-            titulo="Avisos da IA"
+            titulo={t("Avisos da IA")}
             numero={model.resumo.avisos_da_ia}
-            detalhe="Avisos abertos na Central da IA"
+            detalhe={t("Avisos abertos na Central da IA")}
             href="/app/ai/inbox"
             idioma={idioma}
           />
@@ -267,14 +261,16 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
           <CardContent className="space-y-4">
             {model.prioridades.estado === "parcial" ? (
               <AvisoDeFonte
-                texto="Parte das prioridades não pôde ser carregada. O restante continua disponível."
-                idioma={idioma}
+                texto={t(
+                  "Parte das prioridades não pôde ser carregada. O restante continua disponível.",
+                )}
               />
             ) : null}
             {model.prioridades.estado === "indisponivel" ? (
               <AvisoDeFonte
-                texto="As fontes de prioridades estão indisponíveis agora. Tente novamente em instantes."
-                idioma={idioma}
+                texto={t(
+                  "As fontes de prioridades estão indisponíveis agora. Tente novamente em instantes.",
+                )}
               />
             ) : model.prioridades.itens.length === 0 ? (
               <p className="text-sm text-text-muted">
@@ -283,12 +279,7 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
             ) : (
               <ul className="space-y-3">
                 {model.prioridades.itens.map((item) => (
-                  <Prioridade
-                    key={item.id}
-                    item={item}
-                    idioma={idioma}
-                    timezone={timezone}
-                  />
+                  <Prioridade key={item.id} item={item} idioma={idioma} timezone={timezone} />
                 ))}
               </ul>
             )}
@@ -307,10 +298,7 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             {model.atendimento.estado === "indisponivel" ? (
-              <AvisoDeFonte
-                texto="Não foi possível ler os indicadores do Inbox agora."
-                idioma={idioma}
-              />
+              <AvisoDeFonte texto={t("Não foi possível ler os indicadores do Inbox agora.")} />
             ) : (
               <dl className="space-y-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
@@ -349,7 +337,7 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             {model.ia.estado === "indisponivel" ? (
-              <AvisoDeFonte texto="Não foi possível ler o estado da IA agora." idioma={idioma} />
+              <AvisoDeFonte texto={t("Não foi possível ler o estado da IA agora.")} />
             ) : !model.ia.dados.configurada ? (
               <div className="space-y-3">
                 <p className="text-sm text-text-muted">
@@ -401,7 +389,7 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             {model.atividades.estado === "indisponivel" ? (
-              <AvisoDeFonte texto="Não foi possível ler a atividade recente agora." idioma={idioma} />
+              <AvisoDeFonte texto={t("Não foi possível ler a atividade recente agora.")} />
             ) : model.atividades.dados.length === 0 ? (
               <p className="text-sm text-text-muted">{t("Ainda não há atividade registrada.")}</p>
             ) : (
@@ -414,7 +402,8 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
                     <div>
                       <p className="text-sm font-medium text-text">{t(atividade.rotulo)}</p>
                       <p className="text-xs text-text-muted">
-                        {t(atividade.ator)} · {new Date(atividade.realizada_em).toLocaleString(tag, {
+                        {t(atividade.ator)} ·{" "}
+                        {new Date(atividade.realizada_em).toLocaleString(tag, {
                           dateStyle: "short",
                           timeStyle: "short",
                           timeZone: timezone,
@@ -431,14 +420,14 @@ export function CockpitView({ model, idioma, timezone }: CockpitViewProps) {
         </Card>
 
         <Placeholder
-          titulo="Aprovações"
-          descricao="Decisões que exigem confirmação humana aparecerão aqui."
+          titulo={t("Aprovações")}
+          descricao={t("Decisões que exigem confirmação humana aparecerão aqui.")}
           icone={ListChecks}
           idioma={idioma}
         />
         <Placeholder
-          titulo="Supervisor"
-          descricao="A conversa com o Supervisor ainda não está ativa neste Cockpit."
+          titulo={t("Supervisor")}
+          descricao={t("A conversa com o Supervisor ainda não está ativa neste Cockpit.")}
           icone={Sparkle}
           idioma={idioma}
         />

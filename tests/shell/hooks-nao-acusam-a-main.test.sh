@@ -74,6 +74,10 @@
 #        SIGPIPE, o `pipefail` propaga 141 e o `|| exit 0` engole — o hook saía 0 sem
 #        validar NADA. Este caso é o que impede o conserto de trocar um defeito por outro.
 #
+#   check-migration-triple.sh
+#     8. o NNNN e o timestamp já COMMITADOS na própria branch contam (MIG-PROPRIA), e a
+#        guarda contra a main e contra outra branch segue de pé (MIG-CONTROLE).
+#
 # Controle de vivacidade: os casos 2, 3, 4, 5, 6 e 7 são as asserções POSITIVAS (A, B+, D,
 # D2, R1, R1-LIMPO, R-VELHO, FECHADO-SEM-BASE, FURO-A, FURO-A-MH, FURO-B, COLEGA-DEL, MODO,
 # CITADO, SEM-REF, F-A, F-B+, F-CRIA-PRÓPRIA, F-BIG+). Um hook substituído por `exit 0` os
@@ -353,6 +357,129 @@ assert_exit "$(exit_de "$r")" 1 "A: edição genuína fora de merge SEGUE bloque
 # CASO VÁLVULA · o mesmo estado A, com a env declarada
 saida=$( cd "$a" && DESKCOMM_GOV_INVARIANTS_EDIT=1 bash loop/hooks/freeze-invariants.sh 2>&1 ); rc=$?
 assert_exit "$rc" 0 "VÁLVULA: DESKCOMM_GOV_INVARIANTS_EDIT=1 segue liberando o estado A"
+
+# ── #1324 · o `M` diz O QUE mudou, não só que mudou ─────────────────────────────────
+# O eixo acima (A, VÁLVULA) mede a PERMISSÃO. Este mede o OBJETO: um `M` cujo diff,
+# ignorados os comentários, é VAZIO não altera o que o invariante vigia — renumerar a
+# migration citada num comentário não é edição, e passar pela válvula uma coisa dessas é
+# dívida (na terceira vez ninguém lê o que ela liberou). É o caso MEDIDO no commit
+# af28623d7: `rls-isolation.test.ts` (2 linhas) e `vocabulario-banco-x-typescript.test.ts`
+# (1 linha) mudaram SÓ em comentário.
+#
+# COMENTARIO-LINHA é o caso que fica VERMELHO na versão anterior do hook; os seguintes
+# fixam os LIMITES — sem eles, "ignorar comentário" viraria um removedor ingênuo, e o
+# ingênuo tem furo conhecido: `http://waha:3000` DENTRO de string (a armadilha da #1322).
+inv1324() {
+  cat <<'TS'
+import { it, expect } from "vitest";
+// a migration 0012_rls_isolation foi renumerada para 0020 no vocabulário do banco
+const esperado = 2;
+it("MARCADOR-BASE-A", () => { expect(esperado).toBe(2); });
+TS
+}
+# mostra quantas e QUAIS linhas o diff bruto mexe, para a premissa de cada caso não ser
+# uma afirmação de fé: 2 linhas citadas, ambas começando por comentário, é o que se espera.
+linhas_do_diff() { diff <(git -C "$1" show "HEAD:$2") "$1/$2" | grep '^[<>]'; }
+
+# CASO COMENTARIO-LINHA · só o comentário mudou (é o caso da issue, na forma mínima)
+cl="$TMP/comentario-linha"; preparar "$cl" "$principal" "$BASE_DA_BRANCH"
+inv1324 > "$cl/$INV"; commitar "$cl" "o invariante com o comentario antigo"
+sed -i 's/renumerada para 0020/renumerada para 0024/' "$cl/$INV"; git -C "$cl" add "$INV"
+if [ -z "$(git -C "$cl" diff --cached --name-only)" ]; then falha 'COMENTARIO-LINHA: a premissa — a mudança está ENCENADA no índice' 'nada encenado: o caso não mede o M'
+else ok "COMENTARIO-LINHA: a premissa — a mudança está ENCENADA no índice (status M)"; fi
+if [ "$(linhas_do_diff "$cl" "$INV" | grep -c '^[<>] *//')" = "2" ] && [ "$(linhas_do_diff "$cl" "$INV" | wc -l)" = "2" ]; then
+  ok "COMENTARIO-LINHA: a premissa — as DUAS linhas que o diff bruto mexe são de COMENTÁRIO"
+else falha "COMENTARIO-LINHA: as duas linhas do diff são de comentário" "diff: $(linhas_do_diff "$cl" "$INV")"; fi
+r=$(rodar "$cl" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 0 "COMENTARIO-LINHA: mudar SÓ o comentário LIBERA sem DESKCOMM_GOV_INVARIANTS_EDIT"
+saida=$( cd "$cl" && git commit --no-edit -m "renumera a migration citada em comentario" 2>&1 ); rc=$?
+assert_exit "$rc" 0 'COMENTARIO-LINHA: e pelo caminho de produção (git commit, dispatcher) o commit PASSA'
+
+# CASO COMENTARIO-BLOCO · o mesmo, num comentário de BLOCO e num `--` DENTRO de template
+# (o comentário da linguagem hospedada, o SQL das migrations: é onde ele de fato aparece)
+cb="$TMP/comentario-bloco"; preparar "$cb" "$principal" "$BASE_DA_BRANCH"
+cat > "$cb/$INV" <<'TS'
+import { it } from "vitest";
+/* conferido contra vocabulario-banco-x-typescript em 18/09/2026 */
+const sql = `-- 0012 rls isolation
+select 1 as um;`;
+it("MARCADOR-BASE-A", () => {});
+TS
+commitar "$cb" "o invariante com os comentarios antigos"
+sed -i -e 's/em 18\/09\/2026/em 19\/09\/2026/' -e 's/^-- 0012 rls/-- 0024 rls/' "$cb/$INV"; git -C "$cb" add "$INV"
+if [ -n "$(git -C "$cb" diff --cached --name-only)" ]; then ok "COMENTARIO-BLOCO: a premissa — a mudança está ENCENADA (bloco + comentário de SQL)"
+else falha 'COMENTARIO-BLOCO: a premissa — a mudança está encenada' 'nada encenado: o sed não pegou'; fi
+r=$(rodar "$cb" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 0 'COMENTARIO-BLOCO: bloco /* */ e -- dentro de template também liberam sem válvula'
+
+# CASO ASSERCAO-REAL · o CONTROLE NEGATIVO: mudança de asserção de verdade segue bloqueada
+# (é o que prova que a exceção nova não virou "M passa"). Uma troca de número no CORPO do
+# teste é exatamente o que o invariante vigia.
+ar="$TMP/assercao-real"; preparar "$ar" "$principal" "$BASE_DA_BRANCH"
+inv1324 > "$ar/$INV"; commitar "$ar" "o invariante intacto"
+sed -i 's/esperado = 2/esperado = 3/; s/toBe(2)/toBe(3)/' "$ar/$INV"; git -C "$ar" add "$INV"
+if [ "$(linhas_do_diff "$ar" "$INV" | grep -c 'toBe(3)')" -ge 1 ] && [ "$(linhas_do_diff "$ar" "$INV" | grep -c '^[<>] *//')" = "0" ] && [ -n "$(git -C "$ar" diff --cached --name-only)" ]; then
+  ok "ASSERCAO-REAL: a premissa — a mudança toca o CORPO do teste (não o comentário)"
+else falha "ASSERCAO-REAL: a mudança toca o corpo do teste" "diff: $(linhas_do_diff "$ar" "$INV")"; fi
+r=$(rodar "$ar" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 1 "ASSERCAO-REAL: trocar o número da asserção SEGUE BLOQUEADO"
+assert_contains "$(saida_de "$r")" "$INV" "ASSERCAO-REAL: e a mensagem nomeia o invariante"
+
+# CASO STRING · a armadilha da #1322, medida: o valor está DENTRO de string, com `http://`.
+# Um removedor ingênuo (`s,//.*,,`) apaga a URL NOS DOIS lados, eles ficam IGUAIS e uma
+# troca de endereço — que o invariante vigia — passaria em silêncio.
+st="$TMP/string-armadilha"; preparar "$st" "$principal" "$BASE_DA_BRANCH"
+cat > "$st/$INV" <<'TS'
+import { it, expect } from "vitest";
+const baseUrl = "http://waha:3000";
+it("MARCADOR-BASE-A", () => { expect(baseUrl).toBe("http://waha:3000"); });
+TS
+commitar "$st" "o invariante com a URL antiga"
+sed -i 's/waha:3000/waha:4000/g' "$st/$INV"; git -C "$st" add "$INV"
+if [ "$(git -C "$st" show "HEAD:$INV" | sed 's,//.*,,' )" = "$(sed 's,//.*,,' "$st/$INV")" ]; then
+  ok 'STRING: a premissa — um removedor ingênuo de // IGUALARIA os dois lados (o falso liberado existe)'
+else falha "STRING: a premissa do removedor ingênuo" "os lados já diferiam sob o filtro ingênuo: o caso não mede a armadilha"; fi
+r=$(rodar "$st" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 1 'STRING: trocar o endereço DENTRO da string SEGUE BLOQUEADO (o // não é comentário aqui)'
+assert_contains "$(saida_de "$r")" "$INV" "STRING: e a mensagem nomeia o invariante"
+
+# CASO CARONA · comentário E asserção no MESMO commit: o comentário não leva carona
+cr2="$TMP/carona"; preparar "$cr2" "$principal" "$BASE_DA_BRANCH"
+inv1324 > "$cr2/$INV"; commitar "$cr2" "o invariante intacto"
+sed -i 's/renumerada para 0020/renumerada para 0024/; s/esperado = 2/esperado = 3/' "$cr2/$INV"; git -C "$cr2" add "$INV"
+r=$(rodar "$cr2" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 1 "CARONA: renumerar o comentário NÃO libera a asserção que veio junto"
+assert_contains "$(saida_de "$r")" "$INV" "CARONA: e a mensagem nomeia o invariante"
+
+# CASO FLIP-FAILS · a exceção DECLARADA segue exigindo a válvula: o flip `it.fails(` → `it(`
+# é mudança de CÓDIGO (o teste deixa de ser esperado-vermelho), não comentário.
+ff="$TMP/flip-fails"; preparar "$ff" "$principal" "$BASE_DA_BRANCH"
+cat > "$ff/$INV" <<'TS'
+import { it } from "vitest";
+// catraca da G1-03: flipa quando a fase G2+ corrige o gap
+it.fails("MARCADOR-BASE-A", () => {});
+TS
+commitar "$ff" "o invariante com o test.fails"
+sed -i 's/it\.fails(/it(/' "$ff/$INV"; git -C "$ff" add "$INV"
+r=$(rodar "$ff" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 1 "FLIP-FAILS: o flip documentado SEGUE BLOQUEADO sem a válvula"
+saida=$( cd "$ff" && DESKCOMM_GOV_INVARIANTS_EDIT=1 bash loop/hooks/freeze-invariants.sh 2>&1 ); rc=$?
+assert_exit "$rc" 0 "FLIP-FAILS: e com DESKCOMM_GOV_INVARIANTS_EDIT=1 segue liberado (a exceção declarada não se perdeu)"
+
+# CASO COMENTARIO-MODO · o limite do LIMITE: se o MODO mudou junto, não é "só comentário".
+# Os blobs ficam IDÊNTICOS num `chmod +x` (é a cegueira que a CONDIÇÃO 5 tapa no eixo do
+# merge — e que reabriria aqui por outro caminho).
+cm="$TMP/comentario-modo"; preparar "$cm" "$principal" "$BASE_DA_BRANCH"
+inv1324 > "$cm/$INV"; commitar "$cm" "o invariante com o comentario antigo"
+sed -i 's/renumerada para 0020/renumerada para 0024/' "$cm/$INV"
+chmod +x "$cm/$INV"; git -C "$cm" add "$INV"
+if git -C "$cm" ls-files --stage "$INV" | grep -q '^100755' \
+   && [ "$(git -C "$cm" ls-tree HEAD -- "$INV" | awk '{print $1}')" = "100644" ] \
+   && [ "$(linhas_do_diff "$cm" "$INV" | grep -c '^[<>] *//')" = "2" ]; then
+  ok "COMENTARIO-MODO: as premissas — o modo virou 100755 e as 2 linhas que mudaram são de COMENTÁRIO"
+else falha "COMENTARIO-MODO: as premissas (modo mudou, mudança de conteúdo só em comentário)" "$(git -C "$cm" ls-files --stage "$INV")"; fi
+r=$(rodar "$cm" freeze-invariants.sh)
+assert_exit "$(exit_de "$r")" 1 "COMENTARIO-MODO: comentário + chmod +x SEGUE BLOQUEADO (só comentário não é licença)"
 
 # CASO D · a branch DELETA um invariante que a main tem
 d="$TMP/d"; preparar "$d" "$principal" "$BASE_DA_BRANCH"
@@ -798,6 +925,113 @@ if [ "$encenados" -gt 3000 ] && [ "${posicao:-0}" -lt 10 ]; then ok "F-BIG+: $en
 else falha "F-BIG+: volume >3000 e match na posição <10" "encenados=$encenados posicao=${posicao:-nenhuma} — o caso não estressa o pipe"; fi
 r=$(rodar "$fbig" validate-features.sh)
 assert_exit "$(exit_de "$r")" 1 "F-BIG+: em merge grande o hook AINDA valida — a sonda não falha aberta"
+
+# ── check-migration-triple.sh · o que a PRÓPRIA branch já commitou conta (#1776) ──
+# `pop_refs_de_outrem` tira da conta a ref cujo SHA é o do HEAD, e o hook não devolvia
+# o HEAD: a 0411 que a branch JÁ commitou sumia da população, e a segunda 0411 (e o
+# carimbo repetido) passava calada. Na main de antes (`git branch`) ela bloqueava.
+printf '\ncheck-migration-triple.sh — a própria branch está na população\n'
+pmig="$TMP/pmig"; mkdir -p "$pmig/supabase/migrations"
+git -C "$pmig" init -q -b main
+printf 'select 1;\n' > "$pmig/supabase/migrations/20260801000000_0410_da_main.sql"
+printf -- '-- baseline\n' > "$pmig/supabase/baseline.sql"
+printf '| 0410 |\n' > "$pmig/supabase/migrations/MANIFEST.md"
+commitar "$pmig" "0410 na main"
+git -C "$pmig" checkout -q -b colega
+printf 'select 1;\n' > "$pmig/supabase/migrations/20260802000000_0413_do_colega.sql"
+commitar "$pmig" "0413 do colega"
+git -C "$pmig" checkout -q main
+m="$TMP/m-propria"; preparar "$m" "$pmig" main
+mkdir -p "$m/scripts"; cp "$RAIZ/scripts/migration-populacao.sh" "$m/scripts/"
+tripla() { # $1 = clone, $2 = nome em supabase/migrations/
+  printf 'select 1;\n' > "$1/supabase/migrations/$2"
+  printf -- '-- apêndice %s\n' "$2" >> "$1/supabase/baseline.sql"
+  printf '| `%s` |\n' "$2" >> "$1/supabase/migrations/MANIFEST.md"
+  git -C "$1" add -A
+}
+tripla "$m" 20260910000000_0411_primeira.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 0 "MIG-PROPRIA: a primeira 0411 da branch passa (número livre)"
+commitar "$m" "0411 primeira"
+tripla "$m" 20260910010000_0411_segunda.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 1 "MIG-PROPRIA: 0411_primeira commitada + 0411_segunda encenada: BLOQUEIA"
+assert_contains "$(saida_de "$r")" "já existe em: HEAD(20260910000000_0411_primeira.sql)" "MIG-PROPRIA: e o dono nomeado é a própria branch"
+git -C "$m" reset -q --hard HEAD
+tripla "$m" 20260910000000_0412_mesmo_carimbo.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 1 "MIG-PROPRIA: carimbo da migration já commitada, repetido: BLOQUEIA"
+assert_contains "$(saida_de "$r")" "TIMESTAMP 20260910000000 de '20260910000000_0412_mesmo_carimbo.sql' já existe em: HEAD" "MIG-PROPRIA: e acusa o timestamp contra a própria branch"
+git -C "$m" reset -q --hard HEAD
+tripla "$m" 20260910020000_0410_de_novo.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 1 "MIG-CONTROLE: a 0410 da main encenada de novo segue bloqueada"
+git -C "$m" reset -q --hard HEAD
+tripla "$m" 20260910030000_0413_meu.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 1 "MIG-CONTROLE: a 0413 de outra branch segue bloqueada"
+assert_contains "$(saida_de "$r")" "origin/colega(20260802000000_0413_do_colega.sql)" "MIG-CONTROLE: e o dono nomeado é a branch do colega"
+git -C "$m" reset -q --hard HEAD
+tripla "$m" 20260910040000_0414_livre.sql
+r=$(rodar "$m" check-migration-triple.sh)
+assert_exit "$(exit_de "$r")" 0 "MIG-CONTROLE: e um número de fato livre passa"
+
+# ── check-migration-triple.sh · população GRANDE termina (os dois hooks) ─────────
+# Medido em 29/09/2026 no clone do mantenedor: ~5.788 refs de outrem → ~1,29 M linhas
+# (~112 MB) de população, e o hook não terminava em 45 min. A causa era o teste de
+# vazio `${populacao// /}`: a substituição de padrão do bash é quadrática no tamanho da
+# string (medido aqui: 25 mil linhas → 18 s só nessa linha; 100 mil → ~400 s o hook).
+# A população agora vive num ARQUIVO e o grep lê o arquivo. O fixture tem ~300 mil
+# linhas (500 migrations × 600 refs para o mesmo commit — `pop_migrations` emite uma
+# linha por ref) e o LIMITE é folgado para máquina lenta: o hook de antes estoura
+# qualquer limite razoável aqui, o de agora leva ~1 s. O fixture foi dimensionado para o
+# antigo estourar TAMBÉM em locale C (LANG vazio), onde ele termina em ~10 s com 100 mil
+# linhas e o caso passaria sem vigiar; em UTF-8 o antigo é bem mais lento. Rodam os DOIS hooks: o do
+# contribuidor tinha a mesma linha.
+printf '\ncheck-migration-triple.sh — população grande termina (mantenedor e contribuidor)\n'
+LIMITE_S=30
+rodar_com_limite() { # $1 = clone, $2 = caminho do hook relativo ao clone
+  local d=$1 h=$2 pid t=0 rc out="$TMP/saida-com-limite"
+  ( cd "$d" && exec bash "$h" ) >"$out" 2>&1 & pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$t" -lt "$LIMITE_S" ]; do sleep 1; t=$((t+1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    printf 'não terminou em %ss\n__EXIT__estourou\n' "$LIMITE_S"; return
+  fi
+  wait "$pid"; rc=$?
+  printf '%s\n__EXIT__%s\n' "$(cat "$out")" "$rc"
+}
+g="$TMP/mig-grande"; mkdir -p "$g/supabase/migrations" "$g/scripts" "$g/loop/hooks" "$g/contrib"
+git -C "$g" init -q -b main
+cp "$RAIZ/scripts/migration-populacao.sh" "$g/scripts/"
+cp "$HOOKS_ORIGEM/check-migration-triple.sh" "$g/loop/hooks/"
+cp "$RAIZ/.agents/skills/deskcomm-contribuir/scripts/hooks/check-migration-triple.sh" "$g/contrib/"
+printf -- '-- baseline\n' > "$g/supabase/baseline.sql"
+printf '| base |\n' > "$g/supabase/migrations/MANIFEST.md"
+commitar "$g" "base"
+git -C "$g" checkout -q -b outra
+for i in $(seq 1 500); do : > "$g/supabase/migrations/$(printf '2026010100%04d_%04d_m.sql' "$i" "$i")"; done
+commitar "$g" "500 migrations"
+c_outra=$(git -C "$g" rev-parse HEAD)
+git -C "$g" checkout -q main
+seq 1 600 | awk -v c="$c_outra" '{ printf "create refs/heads/r%05d %s\n", $1, c }' | git -C "$g" update-ref --stdin
+linhas=$( cd "$g" && bash -c '. scripts/migration-populacao.sh; pop_migrations $(pop_refs_de_outrem "") HEAD | wc -l' | tr -d ' ')
+if [ "${linhas:-0}" -ge 300000 ]; then ok "MIG-GRANDE: a população do fixture tem $linhas linhas (premissa do volume)"
+else falha "MIG-GRANDE: população >= 300000 linhas" "veio ${linhas:-nada} — o caso não estressa o hook"; fi
+tripla "$g" 20990101000000_9999_livre.sql
+for h in loop/hooks/check-migration-triple.sh contrib/check-migration-triple.sh; do
+  r=$(rodar_com_limite "$g" "$h")
+  assert_exit "$(exit_de "$r")" 0 "MIG-GRANDE ($h): número livre passa em menos de ${LIMITE_S}s"
+done
+git -C "$g" rm -q --cached supabase/migrations/20990101000000_9999_livre.sql
+rm -f "$g/supabase/migrations/20990101000000_9999_livre.sql"
+tripla "$g" 20990101000001_0001_colide.sql
+for h in loop/hooks/check-migration-triple.sh contrib/check-migration-triple.sh; do
+  r=$(rodar_com_limite "$g" "$h")
+  assert_exit "$(exit_de "$r")" 1 "MIG-GRANDE ($h): NNNN tomado segue BLOQUEADO em menos de ${LIMITE_S}s"
+  assert_contains "$(saida_de "$r")" "r00200(20260101000001_0001_m.sql)" "MIG-GRANDE ($h): e o dono é nomeado"
+  assert_contains "$(saida_de "$r")" "próximo livre 0501" "MIG-GRANDE ($h): e a dica mede o teto da MESMA população"
+done
 
 printf '\nhooks-nao-acusam-a-main: %s casos, %s falha(s)\n' "$casos" "$falhas"
 [ "$falhas" -eq 0 ] || exit 1
