@@ -34,6 +34,178 @@ export type Database = {
   }
   public: {
     Tables: {
+      business_profile_contributions: {
+        Row: {
+          applied_version: string
+          contribution_key: string
+          created_at: string
+          id: string
+          managed_fingerprint: string
+          managed_value: NonNullable<Json>
+          organization_id: string
+          parent_contribution_key: string | null
+          profile_id: string
+          resource_kind: string
+          resource_ref: string
+          state: string
+          updated_at: string
+        }
+        Insert: {
+          applied_version: string
+          contribution_key: string
+          created_at?: string
+          id?: string
+          managed_fingerprint: string
+          managed_value: NonNullable<Json>
+          organization_id: string
+          parent_contribution_key?: string | null
+          profile_id: string
+          resource_kind: string
+          resource_ref: string
+          state: string
+          updated_at?: string
+        }
+        Update: {
+          applied_version?: string
+          contribution_key?: string
+          created_at?: string
+          id?: string
+          managed_fingerprint?: string
+          managed_value?: NonNullable<Json>
+          organization_id?: string
+          parent_contribution_key?: string | null
+          profile_id?: string
+          resource_kind?: string
+          resource_ref?: string
+          state?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_profile_contributions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_profile_contributions_parent_fkey"
+            columns: ["organization_id", "profile_id", "parent_contribution_key"]
+            isOneToOne: false
+            referencedRelation: "business_profile_contributions"
+            referencedColumns: ["organization_id", "profile_id", "contribution_key"]
+          },
+        ]
+      }
+      business_profile_installations: {
+        Row: {
+          applied_version: string
+          created_at: string
+          manifest_digest: string
+          organization_id: string
+          profile_id: string
+          revision: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          applied_version: string
+          created_at?: string
+          manifest_digest: string
+          organization_id: string
+          profile_id: string
+          revision: number
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          applied_version?: string
+          created_at?: string
+          manifest_digest?: string
+          organization_id?: string
+          profile_id?: string
+          revision?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_profile_installations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      business_profile_operations: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          expected_revision: number
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          manifest_snapshot: NonNullable<Json>
+          operation_type: string
+          organization_id: string
+          plan_hash: string
+          profile_id: string
+          request_hash: string
+          result: Json | null
+          status: string
+          target_digest: string
+          target_version: string
+          updated_at: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          expected_revision: number
+          finished_at?: string | null
+          id?: string
+          idempotency_key: string
+          manifest_snapshot: NonNullable<Json>
+          operation_type: string
+          organization_id: string
+          plan_hash: string
+          profile_id: string
+          request_hash: string
+          result?: Json | null
+          status?: string
+          target_digest: string
+          target_version: string
+          updated_at?: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          expected_revision?: number
+          finished_at?: string | null
+          id?: string
+          idempotency_key?: string
+          manifest_snapshot?: NonNullable<Json>
+          operation_type?: string
+          organization_id?: string
+          plan_hash?: string
+          profile_id?: string
+          request_hash?: string
+          result?: Json | null
+          status?: string
+          target_digest?: string
+          target_version?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_profile_operations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       channel_integrations: {
         Row: { organization_id: string; profile_id: string; credential_encrypted: string; created_at: string; updated_at: string }
         Insert: { organization_id: string; profile_id: string; credential_encrypted: string; created_at?: string; updated_at?: string }
