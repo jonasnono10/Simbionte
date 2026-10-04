@@ -13,7 +13,12 @@ function normalize(n, source) {
   if (ts.isTypeLiteralNode(n)) return { object: ordered(n.members.map(m => ({ name: key(m), optional: !!m.questionToken, type: normalize(m.type, source) }))) };
   if (ts.isUnionTypeNode(n)) return { union: ordered(n.types.map(t => normalize(t, source))) };
   if (ts.isIntersectionTypeNode(n)) return { intersection: ordered(n.types.map(t => normalize(t, source))) };
-  if (ts.isTupleTypeNode(n)) return { tuple: ordered(n.elements.map(t => normalize(t, source))) };
+  if (ts.isTupleTypeNode(n)) {
+    const items = n.elements.map(t => normalize(t, source));
+    // Relationship entries are unordered; columns inside a composite FK are not.
+    const relations = n.elements.length > 0 && n.elements.every(t => ts.isTypeLiteralNode(t) && t.members.some(m => key(m) === 'foreignKeyName'));
+    return { tuple: relations ? ordered(items) : items };
+  }
   if (ts.isArrayTypeNode(n)) return { array: normalize(n.elementType, source) };
   return printer.printNode(ts.EmitHint.Unspecified, n, source).trim();
 }
