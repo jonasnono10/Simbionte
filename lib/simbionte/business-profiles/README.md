@@ -8,6 +8,14 @@ Contrato declarativo local do SIMBIONTE. Um manifesto tem identidade e versão S
 
 `SAFE_ADD` e `SAFE_METADATA` são propostas, não autorização de escrita. `LOCAL_DRIFT` é preservado; `CONFLICT` e `DESTRUCTIVE` bloqueiam. Se `LOCAL` já for igual a `TARGET` mas divergir de `BASE`, a gestão não é reassumida sem decisão explícita. `PRIVILEGE_EXPANSION` e `EXTERNAL_EFFECT` são categorias de recusa para domínios futuros, nunca contribuições aplicáveis nesta fase.
 
+## F2.3C.0 — etapa observada sem mapeamento
+
+No snapshot de BASE/LOCAL, `step` aceita somente um dos sete `STAGE_STEPS` ou `null`. `step:null` significa ausência declarada de mapeamento para passo do agente: a etapa existe e foi lida corretamente. Não significa erro de banco/parser, timeout, recurso ausente ou dado desconhecido. Snapshot ausente significa recurso não encontrado. O adapter futuro deve abortar o preview em falha de leitura/projeção, nunca fabricar LOCAL vazio ou converter erro em `step:null`.
+
+Não há inferência por nome, posição, slug, `isWon` ou `isLost`; essas duas marcações continuam independentes do passo observado. TARGET permanece estrito e exige um dos sete passos, sem `null`, inclusive nos perfis Genérico e Salão. O three-way preserva LOCAL com passo removido como `LOCAL_DRIFT` quando TARGET=BASE; se o TARGET também muda o passo, classifica `CONFLICT`. Etapa não gerida sem passo continua participando das colisões por nome.
+
+Esta microfase ajusta somente o contrato puro consumido por `planBusinessProfileChanges()` e seus testes. Não cria adapter, API, tela, audit/evento, persistência ou mecanismo operacional; portanto não há nova porta, configuração, decisão automática, anti-morte ou laço runtime. A entrada é o snapshot validado; a saída são classes e `planHash`, provados nos testes do planner. Nenhuma peça nova exige alteração do mapa; a conexão real com preview permanece pendente na F2.3C.
+
 ## F2.3B — memória sem aplicador
 
 A migration `20261003212120_0535_business_profile_persistence.sql` e seu apêndice idempotente no baseline preservam o mesmo DDL. O propósito está no cabeçalho `-- manifest:`; o `MANIFEST.md` histórico não recebe nova entrada. A identidade foi realocada antes do merge para evitar colisões com migrations upstream.
