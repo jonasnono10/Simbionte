@@ -50,6 +50,12 @@
 #  30. mais de 30 PRs abertos: o gate pede --limit, senão o gh corta calado em 30.
 set -uo pipefail
 
+# Estes repositórios são sintéticos, não o PR que executa o workflow.
+# O contexto externo não pode excluir um PR fictício de mesmo número.
+# Cada cenário parte de contexto vazio; gate_prs declara a ref quando mede CI.
+export GITHUB_REF="" GITHUB_HEAD_REF="" GITHUB_BASE_REF=""
+export GITHUB_EVENT_NAME="" GITHUB_EVENT_PATH=""
+
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE_ORIGEM="$RAIZ/scripts/checar-colisao-de-migration.sh"
 
@@ -375,8 +381,8 @@ pr_no_principal() { # $1 = número do PR, $2 = nome da migration que a cabeça d
   done
   [ "$push_ok" = 1 ] || { echo "pr_no_principal: push para refs/pull/$1/head falhou 3x" >&2; exit 90; }
 }
-gate_prs() { # $1 = PRs abertos que o gh falso lista, $2 = clone
-  ( export FAKE_GH_PRS="$1"; cd "$2" && bash scripts/checar-colisao-de-migration.sh origin/main 2>&1 )
+gate_prs() { # $1 = PRs abertos, $2 = clone, $3 = ref de PR sintético (opcional)
+  ( export FAKE_GH_PRS="$1" GITHUB_REF="${3:-}"; cd "$2" && bash scripts/checar-colisao-de-migration.sh origin/main 2>&1 )
 }
 pr_no_principal 7 "20260917100000_0276_do_fork.sql"
 pr_no_principal 9 "20260917120000_0400_abandonado.sql"
@@ -565,6 +571,15 @@ assert_not_contains "$saida" "NNNN=0291" "o 0290 antigo do próprio PR não empu
 teto_main="$(git -C "$principal" ls-tree -r --name-only main -- supabase/migrations \
   | sed -nE 's#^.*/[0-9]{14}_([0-9]{4})_.*$#\1#p' | sort -n | tail -1)"
 assert_contains "$saida" "NNNN=$(printf '%04d' $((10#$teto_main + 1)))" "o próximo livre é o teto da main + 1 (a main anda nesta suíte: $teto_main)"
+
+# (c) contexto CI explicitamente controlado: #5 é próprio, #7 continua medido.
+# Aqui ambos são forks para que a exclusão de #5 só possa vir da ref declarada.
+saida="$(gate_prs "5 7" "$c" "refs/pull/5/merge")"; code=$?
+assert_exit "$code" 0 "contexto CI sintético não reprova o próprio PR"
+assert_contains "$saida" "O seu fica fora: #5" "a ref sintética exclui somente o próprio PR"
+assert_not_contains "$saida" "PR aberto #5" "o número antigo do próprio PR sai no contexto CI"
+assert_contains "$saida" "PR aberto #7" "outro PR continua medido no contexto CI"
+assert_contains "$saida" "NNNN=0277" "outro PR continua elevando o teto no contexto CI"
 
 echo "29. cópia de PR em refs/remotes/*/pr/N (fetch de triagem) não traz fantasma de volta"
 c="$TMP/c29"; clonar "$c"; git -C "$c" switch -q -c fix/pr
