@@ -75,6 +75,9 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "business_profile_installations", razao: "tests/invariants/business-profile-persistence.test.ts — manager/admin da org A leem a instalação; manager da org B lê zero de A por JWT; viewer/agent, convite pendente e platform admin fora de suporte não leem" },
+  { tabela: "business_profile_contributions", razao: "tests/invariants/business-profile-persistence.test.ts — contribuição real na org A, leitura positiva manager/admin local e zero cross-tenant por JWT de manager B; sem escrita direta" },
+  { tabela: "business_profile_operations", razao: "tests/invariants/business-profile-persistence.test.ts — operação real na org A, leitura positiva manager/admin local e zero cross-tenant por JWT de manager B; sem escrita direta" },
   { tabela: "golden_candidates", razao: "tests/invariants/golden-candidates.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
   { tabela: "jev_observacoes", razao: "tests/invariants/jev-observacoes.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
   { tabela: "prospecting_settings", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
