@@ -64,7 +64,7 @@ for DB in probe_a probe_b; do
   TABLES="$(docker exec "$CONTAINER" psql -U postgres -d "$DB" -At -c "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE' and table_name in ('business_profile_installations','business_profile_contributions','business_profile_operations')")"
   test "$TABLES" = 3 || { echo BASELINE_TYPE_SOURCE_GAP; exit 1; }
   # Credentials are synthetic and only reach this disposable loopback database.
-  "$CLI" gen types typescript --db-url "postgresql://postgres:postgres@127.0.0.1:$PORT/$DB" --schema public > "$OUT/database.types.$DB.ts" 2> "$OUT/$DB-generation.log"
+  "$CLI" gen types typescript --db-url "postgresql://postgres:postgres@127.0.0.1:$PORT/$DB?sslmode=disable" --schema public > "$OUT/database.types.$DB.ts" 2> "$OUT/$DB-generation.log"
   test -s "$OUT/database.types.$DB.ts"
 done
 cp lib/database.types.ts "$OUT/database.types.current.ts"
