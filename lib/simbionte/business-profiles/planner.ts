@@ -1,11 +1,11 @@
 import { z } from "zod";
 
 import { compareKeys, normalizeBusinessProfileManifest, RESOURCE_ORDER, sha256Canonical } from "./canonical";
-import type { ProfileContribution, ResourceKind } from "./manifest";
+import { STAGE_STEPS, type ProfileContribution, type ResourceKind } from "./manifest";
 
 const pipelineValue = z.strictObject({ name: z.string(), isDefault: z.boolean() });
 const stageValue = z.strictObject({
-  name: z.string(), step: z.string(), position: z.number(), isWon: z.boolean(), isLost: z.boolean(),
+  name: z.string(), step: z.enum(STAGE_STEPS).nullable(), position: z.number(), isWon: z.boolean(), isLost: z.boolean(),
 });
 const fieldValue = z.strictObject({
   fieldKey: z.string(), label: z.string(), type: z.string(), required: z.boolean(),
