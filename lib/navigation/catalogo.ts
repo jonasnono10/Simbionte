@@ -286,6 +286,20 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
+    // A porta dos planos de tarefa (#1752): montar a sequência UMA vez e o
+    // `apply_task_plan` aplicá-la a cada negócio. Fica no MESMO hub de Tarefas,
+    // mas SEM `sidebar` pelo critério já usado em Empresas/Pessoas: é
+    // CADASTRO, não uso diário — quem monta um plano abre esta tela poucas
+    // vezes, e o menu de 900px (`tests/e2e/navegacao.spec.ts`) não ganha mais
+    // um pixel por isso.
+    href: "/app/tasks/planos",
+    label: "Planos de tarefa",
+    description: "Sequências reutilizáveis de tarefas — montar uma vez e aplicar a cada negócio.",
+    icon: "FlowArrow",
+    group: "crm",
+    section: "O dia a dia da venda",
+  },
+  {
     // Módulo VoIP (migration 0347). No grupo do CRM pelo mesmo critério de
     // Tarefas: quem atende confere ligações perdidas e transcrições no dia a
     // dia, não como revisão deliberada.
@@ -439,6 +453,10 @@ export const NAV_CATALOG = [
     // O balcão continua a um clique: CRM › Ver tudo em CRM › "O dia a dia da
     // venda", e pelo ⌘K digitando "comanda".
     minRole: "viewer",
+    // Módulo de tabela (ADR-0002, #1907): as cinco tabelas da comanda nascem na
+    // instalação do `financeiro` em `/admin/modulos`; sem ele a porta some, como
+    // `/app/honorarios`. O caixa (Configurações › Financeiro) é núcleo e fica.
+    modulo: "financeiro",
   },
   {
     // O catálogo financeiro: contas, formas de pagamento e plano de contas.
@@ -881,6 +899,20 @@ export const NAV_CATALOG = [
     minRole: "manager",
   },
   {
+    // A porta do freio POR EMPRESA do passo `ai_decide` (issue #2367). O #2228
+    // criou o passo e o deixou opcional POR REGRA; sem esta tela, desligar de
+    // uma vez todos os `ai_decide` de uma organização só existiria como
+    // `UPDATE` à mão no `organizations.settings` — o anti-exemplo de "toda
+    // configuração tem superfície" (docs/doctrine/restricao-de-canal.md).
+    href: "/app/settings/automacoes",
+    label: "Automações",
+    description: "O freio único do passo em que a IA escolhe entre as opções de uma regra, para a empresa inteira.",
+    icon: "FlowArrow",
+    group: "organizacao",
+    section: "Sua empresa",
+    minRole: "manager",
+  },
+  {
     // A porta que faltava para o vocabulário de etiquetas (issue #852). Até
     // aqui a etiqueta só ENTRAva no vocabulário — cada agente escrevia a que
     // quisesse em `add_tag` — e não havia por onde corrigir, juntar as duas
@@ -978,8 +1010,10 @@ export const NAV_CATALOG = [
   },
   {
     href: "/app/settings/billing",
-    label: "Billing",
-    description: "Plano e cobrança.",
+    // Spec da cobrança §9: as mensagens de limite e a Central mandam para
+    // "Configurações › Plano e cobrança" — o item precisa ter esse nome.
+    label: "Plano e cobrança",
+    description: "Pagamento, troca de plano e faturas da sua empresa.",
     icon: "Receipt",
     group: "organizacao",
     section: "Sua empresa",
