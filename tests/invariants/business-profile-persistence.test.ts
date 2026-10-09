@@ -259,7 +259,7 @@ describe("Business Profile — memória sem aplicador", () => {
 
   it("migration reaplica sobre dados existentes", () => {
     const migration = readFileSync(
-      path.resolve("supabase/migrations/20261003212120_0535_business_profile_persistence.sql"),
+      path.resolve("supabase/migrations/20261003212120_0623_business_profile_persistence.sql"),
       "utf8",
     );
     sql(migration);

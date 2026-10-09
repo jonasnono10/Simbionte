@@ -4,12 +4,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "../../../..");
-const migrationName = "20261003212120_0535_business_profile_persistence.sql";
+const migrationName = "20261003212120_0623_business_profile_persistence.sql";
 const migration = readFileSync(path.join(root, "supabase/migrations", migrationName), "utf8");
 const baseline = readFileSync(path.join(root, "supabase/baseline.sql"), "utf8");
 const manifest = readFileSync(path.join(root, "supabase/migrations/MANIFEST.md"), "utf8");
-const marker = "-- ---- memória e governança dos Business Profiles (migration 0535) ----";
-const endMarker = "-- ---- fim da memória e governança dos Business Profiles (migration 0535) ----";
+const marker = "-- ---- memória e governança dos Business Profiles (migration 0623) ----";
+const endMarker = "-- ---- fim da memória e governança dos Business Profiles (migration 0623) ----";
 
 function normalized(sql: string): string {
   return sql.replace(/--[^\r\n]*/g, "").replace(/\s+/g, " ").trim();

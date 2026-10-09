@@ -18,7 +18,7 @@ Esta microfase ajusta somente o contrato puro consumido por `planBusinessProfile
 
 ## F2.3B — memória sem aplicador
 
-A migration `20261003212120_0535_business_profile_persistence.sql` e seu apêndice idempotente no baseline preservam o mesmo DDL. O propósito está no cabeçalho `-- manifest:`; o `MANIFEST.md` histórico não recebe nova entrada. A identidade foi realocada antes do merge para evitar colisões com migrations upstream.
+A migration `20261003212120_0623_business_profile_persistence.sql` e seu apêndice idempotente no baseline preservam o mesmo DDL. O propósito está no cabeçalho `-- manifest:`; o `MANIFEST.md` histórico não recebe nova entrada. Na integração upstream, somente o número documental foi realocado para evitar colisão; o timestamp `20261003212120`, identidade da migration no Supabase, e o SQL executável foram preservados.
 
 O banco mantém três tabelas, todas por organização: `business_profile_installations` (perfil atual, versão, digest, status e revisão monotônica positiva), `business_profile_contributions` (proveniência e último `managed_value` realmente aplicado, a BASE do próximo three-way diff) e `business_profile_operations` (chave idempotente, snapshot declarativo do manifesto e recibo terminal). Não há tabela separada de recibos. Perfil `active` não significa funil padrão; `disabled` não apaga a configuração. `managed_value` contém somente configuração gerida, nunca objeto bruto do CRM ou dados de cliente; o contrato semântico por tipo permanece na camada de aplicação futura. O snapshot da operação é imutável mesmo enquanto ela está `prepared`, para que uma versão antiga não dependa do catálogo de código atual.
 
