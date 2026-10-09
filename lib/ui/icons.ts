@@ -46,9 +46,13 @@ export {
   Dot,
   // actions
   ArrowBendUpLeft,
+  // videochamada (#2440): ícone de câmera, não Video (que no Phosphor é a
+  // janela de player) — junto do Phone do DialButton, a família é a mesma.
+  VideoCamera,
   List,
   Bell,
   BellSlash,
+  EnvelopeSimple,
   PaperPlaneTilt,
   Smiley,
   Check,
@@ -77,6 +81,7 @@ export {
   // lgpd
   Scales as ScalesSimple,
   Eye,
+  EyeSlash,
   ChartBar,
   ClockCountdown,
   // painéis de evolução / aprendizado
@@ -88,6 +93,9 @@ export {
   MonitorPlay,
   // conversation
   ChatCircle,
+  WhatsappLogo,
+  InstagramLogo,
+  MessengerLogo,
   Phone,
   PhoneIncoming,
   PhoneOutgoing,
@@ -101,6 +109,7 @@ export {
   Note,
   FileText,
   Lock,
+  LockOpen,
   Receipt,
   Tag,
   Question,
@@ -142,4 +151,6 @@ export {
   GoogleLogo,
   MapPin,
   ArrowsOutSimple,
+  // /admin/modulos: módulo opcional com tabela própria (ADR-0002)
+  Stack,
 } from "@phosphor-icons/react/dist/ssr";

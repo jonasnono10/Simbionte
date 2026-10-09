@@ -34,13 +34,14 @@ São conclusões de leitura de código.
 | `/`, `/login`, `/signup`, `/auth/confirm` | Supabase Auth | ❌ |
 | `/team/accept-invite/:token` | HMAC-SHA256 + `timingSafeEqual` (`lib/auth/invite-token.ts`) | ❌ |
 | `/api/v1/health` | nenhum (por design) | ❌ |
-| `/api/v1/webhooks/waha/*` | HMAC-SHA512 + `timingSafeEqual` (`lib/waha/ingest.ts`) | ❌ |
+| `/api/v1/webhooks/waha/:token` | HMAC-SHA512 + `timingSafeEqual` (`lib/waha/ingest.ts`) | ❌ |
+| `/api/v1/webhooks/waha` (global, sem token) | só rede interna: requisição com marca de proxy de borda recebe 404 (`chegouPelaBorda`, `lib/http/ip-do-cliente.ts` — régua de cabeçalho, válida nos proxies do kit: Caddy, Traefik, Nginx Proxy Manager, túnel da Cloudflare); depois, o mesmo HMAC. Com a porta do app publicada direto, a camada que vale é a assinatura do remetente (`/admin/sistema`) | ❌ |
 | `/api/v1/webhooks/in/:token` | path token + assinatura opcional | ✅ 60/min por token |
 | `/api/v1/webhooks/nuvemshop/*` | HMAC | ❌ |
 | `/api/v1/cron/*` (9 rotas) | `Bearer INTERNAL_CRON_SECRET\|INTERNAL_SECRET`, **fail-closed** | ❌ |
 | `/api/internal/*` | `x-internal-secret` ou `Bearer INTERNAL_SECRET`, comparação em tempo constante | ❌ |
 | `/api/mcp` | `Bearer tok_...` validado contra `api_tokens` (hash SHA256) | ❌ |
-| `/account-suspended`, `/403`, `/404`, `/500`, `/503`, `/admin/forbidden` | — | ❌ |
+| `/403`, `/404`, `/500`, `/503`, `/admin/forbidden` | — | ❌ |
 
 **Leitura:** a autenticação de cada superfície está bem construída — HMAC com
 `timingSafeEqual` em 6 módulos distintos, crons fail-closed, bearer só via header
@@ -178,6 +179,16 @@ implementam guard de URL de saída, e existe E2E dedicado
 `outbound-url.test.ts` é unitário e roda, o que cobre a lógica de decisão; o que não roda é a
 prova de que o egress real está barrado ponta a ponta. Uma regressão na integração passa.
 
+**Segundo egress do servidor (branch das extensões declarativas):** `lib/extensions/download.ts`
+baixa o pacote de uma origem de catálogo que o dono da instalação admitiu. Guarda própria, não a
+de webhook: só HTTPS, sem redirect, sem cookie nem credencial, DNS resolvido uma vez e o endereço
+amarrado à conexão (sem janela de rebinding), endereços especiais IPv4/IPv6 recusados, teto de
+bytes contado no corpo lido e prazo total de 15 s. A exceção HTTP em loopback
+(`EXTENSIONS_LOCAL_CATALOG_ORIGIN`) só vale com o app também em loopback. Para ver o que roda:
+`pnpm exec vitest run lib/extensions/download.test.ts lib/extensions/download-rebinding.test.ts`.
+**Ressalva do mesmo tipo:** o caminho HTTPS real (SNI, certificado, lookup amarrado) não é
+exercitado por nenhum gate — os testes usam HTTP local e um dublê do lookup.
+
 ### T7 — Sem varredura de secret no histórico git 🟡 CONFIRMADO
 
 Sem gitleaks/trufflehog no CI, sem pre-commit hook (`.husky` e `.pre-commit-config.yaml`
@@ -204,8 +215,9 @@ Não avaliado por falta de execução/instância:
 - Storage: se o bucket `whatsapp-media` está privado de fato e se a expiração das signed
   URLs é adequada.
 - Storage, e este é MEDIDO e DECLARADO em vez de "não avaliado": `brand-logos` (migration
-  0158) é o **único bucket público** do repositório — os outros quatro nascem
-  `public = false`. A exceção existe porque o logo é renderizado num `<img>` da tela de
+  0158) é o **único bucket público** do repositório — todos os outros nascem
+  `public = false` (inclusive `catalog-photos`, das fotos do catálogo, migration 0390), e
+  quem conta é `tests/invariants/marca-logo.test.ts`, que reprova um segundo bucket público. A exceção existe porque o logo é renderizado num `<img>` da tela de
   **login**, servida a quem não tem sessão, e URL assinada **vence**: a marca da instalação
   sumiria da fachada sozinha no dia do vencimento. O que a contém, e o que
   `tests/invariants/marca-logo.test.ts` reprova quando deixa de valer: bucket **exclusivo**

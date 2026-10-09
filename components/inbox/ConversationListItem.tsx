@@ -5,15 +5,23 @@ import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 import type { Locale } from "date-fns";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { useT } from "@/hooks/i18n/useT";
-import { Phone, Robot } from "@/lib/ui/icons";
+import { Robot } from "@/lib/ui/icons";
+import { ChannelLogo } from "@/components/inbox/ChannelLogo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { ChipDeEtiqueta } from "@/components/tags/ChipDeEtiqueta";
 import { OwnerBadge } from "@/components/kanban/OwnerBadge";
-import { comandoDaConversa } from "@/lib/inbox/comando-da-conversa";
+import {
+  comandoDaConversa,
+  esperaDaConversa,
+  ROTULO_DO_COMANDO,
+  STATUS_ENCERRADOS,
+} from "@/lib/inbox/comando-da-conversa";
 import { cn } from "@/lib/utils";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { phoneForDisplay } from "@/lib/channels/phone-variants";
+import { rotuloDoCanalDaConversa } from "@/lib/channels/estado";
 
 interface Props {
   conversation: ConversationWithContact;
@@ -100,12 +108,20 @@ function relativeTime(iso: string | null, locale: Locale): string {
   return format(d, "dd/MM");
 }
 
-/** "Aguardando há 5 min" — desde a última mensagem do cliente (fallback: criação). */
+/**
+ * "Aguardando há 5 min" — desde quando o cliente ESPERA.
+ *
+ * A régua é `esperaDaConversa`, a mesma `awaiting_since` que ordena a Fila
+ * (#990): `last_inbound_at` é a ÚLTIMA mensagem do cliente, então a pílula de
+ * quem insistia voltava para "há 1 min" a cada mensagem dele — o tempo na linha
+ * contradizia a posição do lado e a ordem da lista. O fallback segue sendo a
+ * criação, para a conversa que nunca recebeu mensagem.
+ */
 function waitingLabel(
   conversation: ConversationWithContact,
   t: (texto: string) => string = (texto) => texto, locale: Locale,
 ): string {
-  const since = conversation.last_inbound_at ?? conversation.created_at;
+  const since = esperaDaConversa(conversation);
   if (!since) return t("Aguardando");
   return `${t("Aguardando")} ${formatDistanceToNowStrict(new Date(since), { addSuffix: true, locale: locale })}`;
 }
@@ -134,9 +150,9 @@ export function ConversationListItem({
   /**
    * A HORA DO CANTO RESPONDE À MESMA PERGUNTA QUE ORDENA A LISTA.
    *
-   * Na Fila a lista sai por TEMPO DE ESPERA (`ORDEM_DA_ESPERA`: `last_inbound_at`
-   * crescente), mas a hora do canto era sempre a da última mensagem de QUALQUER
-   * lado. Bastava o atendente responder para o número daquela linha pular para
+   * Na Fila a lista sai por TEMPO DE ESPERA (`ORDEM_DA_ESPERA`: `awaiting_since`
+   * crescente — a mensagem mais antiga sem resposta, #990), mas a hora do canto era
+   * sempre a da última mensagem de QUALQUER lado. Bastava o atendente responder para o número daquela linha pular para
    * agora sem que a linha saísse do lugar: lida de cima para baixo, a coluna de
    * horas saía fora de ordem (#464 — "a lista parece aleatória") embaixo de uma
    * lista que estava certa.
@@ -149,7 +165,7 @@ export function ConversationListItem({
    * de distância, seriam a próxima divergência.
    */
   const horaDaOrdem = naFila
-    ? conversation.last_inbound_at ?? conversation.created_at
+    ? esperaDaConversa(conversation)
     : conversation.last_message_at;
   const time = relativeTime(horaDaOrdem, localeDaData);
   const unread = conversation.unread_count_for_assignee ?? 0;
@@ -169,18 +185,41 @@ export function ConversationListItem({
     assigned_to_user_name: conversation.assigned_to_user_name ?? null,
     assignee_kind: conversation.assignee_kind ?? null,
     bot_silenced_until: conversation.bot_silenced_until ?? null,
+    last_handoff_reason: conversation.last_handoff_reason ?? null,
     force_human: c?.force_human ?? null,
     is_blocked: c?.is_blocked ?? null,
+    is_group: conversation.is_group ?? false,
     automaticoDaOrg,
   });
   const isAi = comando.quem === "automatico";
   const dot = COR_DO_COMANDO[comando.quem] ?? COR_DO_COMANDO.ninguem;
+  // A cor sozinha não se explica: quem não decorou a tabela perguntava o que
+  // cada bolinha queria dizer. A palavra é a de ROTULO_DO_COMANDO, o rótulo que
+  // o produto já define para cada estado, no passar do mouse e no leitor de
+  // tela — antes ela era `aria-hidden`.
+  //
+  // Encerrada vence `humano` só na PALAVRA. Fechar não solta o dono
+  // (`fn_service_status`), e `comandoDaConversa` segue dizendo `humano` para
+  // nomear quem atendeu — a cor acompanha isso e fica como estava. Mas escrever
+  // "Em atendimento" numa conversa fechada afirmaria no presente um atendimento
+  // que acabou.
+  const rotuloDoComando = t(
+    STATUS_ENCERRADOS.has(conversation.status)
+      ? ROTULO_DO_COMANDO.encerrada
+      : (ROTULO_DO_COMANDO[comando.quem] ?? ROTULO_DO_COMANDO.ninguem),
+  );
 
-  // O número DA EMPRESA por onde esta conversa chegou — não o do cliente. Com
-  // dois canais é o que decide o tom da resposta e qual número a pessoa vê
-  // respondendo. Cai no nome do canal quando não há número (canal recém-criado).
+  // QUEM MANDA ESTA CONVERSA — o número DA EMPRESA por onde ela chegou, não o
+  // do cliente. Com dois canais é o que decide o tom da resposta e qual número
+  // a pessoa vê respondendo.
+  //
+  // #2383: quando o canal tem nome ou número, o texto é o MESMO do card da tela
+  // de canais (`/app/connections`), com o nome amigável na frente — antes o
+  // número vencia o nome, e um canal chamado "Peças" saía na lista como o
+  // número cru. Sem canal associado (grupo, conversa sem sessão, não-WA) e sem
+  // nome E sem número o badge continua não existindo, como estava.
   const canal = conversation.channel_sessions ?? null;
-  const rotuloCanal = canal?.phone_number ?? canal?.display_name ?? null;
+  const rotuloCanal = rotuloDoCanalDaConversa(canal, t);
 
   const temSelos =
     visibleTags.length > 0 ||
@@ -223,11 +262,14 @@ export function ConversationListItem({
         </Avatar>
         <span
           className={cn(
-            "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
+            "absolute -bottom-0.5 -left-0.5 h-3 w-3 rounded-full border-2 border-background",
             dot,
           )}
-          aria-hidden
+          role="img"
+          aria-label={rotuloDoComando}
+          title={rotuloDoComando}
         />
+        <ChannelLogo channel={canal} size={16} className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-background ring-2 ring-background" />
       </div>
 
       <div className="min-w-0 flex-1">
@@ -245,21 +287,37 @@ export function ConversationListItem({
           </div>
         )}
         <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "truncate text-sm",
-              unread > 0 ? "font-semibold text-text" : "font-medium text-text",
-              c?.is_anonymized && "font-normal italic text-text-muted",
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={cn(
+                "truncate text-sm",
+                unread > 0 ? "font-semibold text-text" : "font-medium text-text",
+                c?.is_anonymized && "font-normal italic text-text-muted",
+              )}
+            >
+              {displayName}
+            </span>
+            {/*
+              A ETIQUETA "GRUPO", ao lado do nome.
+              `conversations.is_group` já chega no SELECT do handler (schema
+              original) — sem este selo, a lista não distingue um grupo de uma
+              conversa individual até abrir a conversa e ver vários remetentes
+              na mesma linha do tempo (ver `MessageBubble`, que mostra QUEM
+              mandou cada mensagem dentro do grupo).
+            */}
+            {conversation.is_group && (
+              <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+                {t("Grupo")}
+              </Badge>
             )}
-          >
-            {displayName}
           </span>
           <span
             className="shrink-0 text-[11px] tabular-nums text-text-subtle"
             // O mesmo lugar da tela mostra duas coisas diferentes conforme a aba:
-            // na Fila é "desde quando o cliente escreveu", nas outras é "há quanto
-            // tempo a conversa mexeu". O rótulo existe só onde a leitura muda.
-            title={naFila ? t("Última mensagem do cliente") : undefined}
+            // na Fila é "desde quando o cliente ESPERA" (a mensagem mais antiga sem
+            // resposta — #990), nas outras é "há quanto tempo a conversa mexeu". O
+            // rótulo existe só onde a leitura muda.
+            title={naFila ? t("Desde quando o cliente espera resposta") : undefined}
           >
             {time}
           </span>
@@ -287,9 +345,7 @@ export function ConversationListItem({
         {temSelos && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {visibleTags.map((t) => (
-              <Badge key={t} variant="secondary" className="h-4 px-1.5 text-[10px]">
-                {t}
-              </Badge>
+              <ChipDeEtiqueta key={t} tag={t} className="h-4 px-1.5 text-[10px]" />
             ))}
             {overflow > 0 && (
               <span className="text-[10px] text-text-muted">+{overflow}</span>
@@ -297,14 +353,18 @@ export function ConversationListItem({
             {mostrarAtendente && comando.quem === "humano" && (
               <OwnerBadge ownerKind="user" ownerName={comando.nome ?? t("Atendente")} compacto />
             )}
+            {/* #2383: `min-w-0` + `max-w` + `truncate` — o mesmo tratamento do
+                badge do cabeçalho. Uma linha de badges é `flex-wrap`, então um
+                nome de canal comprido ESTOURARIA a faixa para fora da coluna da
+                lista (critério de aceite: layout utilizável com nomes maiores).
+                O `title` devolve o texto inteiro para quem passa o mouse. */}
             {mostrarCanal && rotuloCanal && (
               <Badge
                 variant="outline"
-                className="h-4 gap-1 px-1.5 text-[10px] font-normal text-text-muted"
+                className="h-4 min-w-0 max-w-[9rem] gap-1 truncate px-1.5 text-[10px] font-normal text-text-muted"
                 title={`${t("Entrou por")} ${rotuloCanal}`}
               >
-                <Phone size={9} weight="regular" aria-hidden />
-                {rotuloCanal}
+                <span className="truncate">{rotuloCanal}</span>
               </Badge>
             )}
             {c?.is_blocked && (

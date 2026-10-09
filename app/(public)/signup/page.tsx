@@ -1,8 +1,9 @@
 import Link from "next/link";
 
+import { EntrarComGoogle } from "@/components/auth/EntrarComGoogle";
 import { SignupForm } from "@/components/auth/SignupForm";
 import { Button } from "@/components/ui/button";
-import { branding } from "@/lib/branding";
+import { marcaDaSaida } from "@/lib/branding/saida";
 import { verifyInviteToken } from "@/lib/auth/invite-token";
 import { modoDeCadastro } from "@/lib/auth/politica-de-cadastro";
 import { createClient } from "@/lib/supabase/server";
@@ -51,9 +52,14 @@ export default async function SignupPage({
     (user?.user_metadata?.locale as string | undefined) ?? null,
   );
   const t = (texto: string) => traduzir(texto, idioma);
+  // O nome da marca vem do resolvedor que LÊ O BANCO (`marcaDaSaida`: banco
+  // acima do `.env`, e nunca lança) — `branding()` só veria a semente do `.env`,
+  // e o convite não muda isso (#2511, mesmo defeito das páginas `/legal`).
+  const marca = await marcaDaSaida(null);
 
   // Convite VÁLIDO passa em qualquer modo — é o ponto inteiro do convite.
-  const soPorConvite = !convite && (await modoDeCadastro()) === "so_convite";
+  const modo = convite ? null : await modoDeCadastro();
+  const soPorConvite = modo === "so_convite";
 
   if (soPorConvite) {
     return (
@@ -86,8 +92,13 @@ export default async function SignupPage({
         <p className="text-sm text-muted-foreground">
           {convite
             ? t("Crie sua senha para entrar na empresa que te convidou")
-            : `${t("Comece a usar o")} ${branding().name} ${t("em minutos")}`}
+            : `${t("Comece a usar o")} ${marca.nome} ${t("em minutos")}`}
         </p>
+        {modo === "com_aprovacao" && (
+          <p className="text-sm text-muted-foreground">
+            {t("Nesta instalação, a empresa só é criada depois da aprovação de quem administra.")}
+          </p>
+        )}
       </div>
 
       {conviteExpirado && (
@@ -102,6 +113,9 @@ export default async function SignupPage({
       )}
 
       <SignupForm convite={convite} />
+      {/* O convite atravessa o Google na URL de retorno: sem ele, quem foi
+          convidado e cria a conta com Google ganharia uma empresa própria. */}
+      <EntrarComGoogle convite={convite?.token} />
 
       <p className="text-center text-sm text-muted-foreground">
         {t("Já tem conta?")}{" "}
