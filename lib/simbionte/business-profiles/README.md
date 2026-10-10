@@ -25,3 +25,32 @@ O banco mantém três tabelas, todas por organização: `business_profile_instal
 RLS oferece leitura apenas a manager/admin da organização por `fn_user_org_ids()` e `fn_role_at_least()`; suporte full/read-only segue o RBAC canônico. Platform admin fora de uma organização não ganha leitura implícita. Não há policy ou GRANT de escrita para cliente nem para `service_role`; um aplicador futuro precisará de autorização própria e migration explícita. O trigger novo só impede reescrita do pedido e de recibos terminais; não toca CRM, não faz HTTP e não emite evento. `ON DELETE CASCADE` da organização segue a política de remoção do projeto.
 
 **Não existe aplicação nesta entrega:** nenhuma rota, UI, RPC, worker, criação de pipeline/etapa/campo ou escrita operacional. A entrada futura é o planner puro F2.3A; a saída futura é um preview/recibo legível e um aplicador autorizado, ambos ainda inexistentes. A observabilidade, porta de UI, audit e laço de retorno são decisões das fases operacionais posteriores, não capacidades desta fundação.
+
+## F2.3D1 — autoridade oficial, sem Apply
+
+`public.fn_business_profile_manifest_authorized(profile_id, version, digest)` é
+um helper SQL interno e fail-closed, com triplas fixas para os dois perfis 1.0.0.
+Não duplica o catálogo nem cria tabela de registry, segredo, SQL dinâmico ou
+escrita. Desconhecidos e null retornam false; não há latest nem fallback.
+
+Autoriza SHA-256 dos bytes UTF-8 de
+`canonicalJson(normalizeBusinessProfileManifest(target))`, não JSON equivalente
+em qualquer formato. Ordem textual, whitespace e newline adulterados não são
+reparados antes do hash. O catálogo pertence ao TypeScript; uma mudança exige
+evolução explícita do registry em nova migration. O drift gate compara o código
+atual com as triplas literais do SQL, sem autorizar catálogo novo automaticamente.
+
+Migration e apêndice 0627 equivalem. Helper SECURITY INVOKER, search_path seguro
+pg_catalog, owner postgres; EXECUTE revogado de PUBLIC, anon, authenticated e
+service_role, concedido explicitamente só a postgres. Não concede escrita nem
+RPC de cliente. O executor continua fora desta fase. Invariantes PostgreSQL
+provam hash Node/PG15/PG17, recusa efetiva de chamada, ausência de EXECUTE,
+definição instalada, reaplicação e preservação de CRM/memória com dados.
+
+Living System Checklist: entrada = catálogo normalizado/bytes canônicos;
+saída concreta = gate de drift e invariantes de autoridade. Consumo pelo executor
+ainda não existe: exceção temporária explícita de fundação zero-Apply. Não há
+UI, porta HTTP, configuração editável, atividade, audit de mutação ou handoff.
+Anti-morte é N/A para leitura pura. Laço de retorno = teste vermelho obriga
+revisão humana e nova migration quando o catálogo muda. Conexões documentadas
+aqui, sem ampliar mapa/core fora da boundary autorizada.
